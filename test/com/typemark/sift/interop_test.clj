@@ -1,11 +1,11 @@
-(ns au.com.heisenbergtech.scan.interop-test
+(ns com.typemark.sift.interop-test
   (:require [clojure.test :refer [deftest is testing]]
             [clojure.test.check.clojure-test :refer [defspec]]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
-            [au.com.heisenbergtech.scan.concurrency :as concurrency]
-            [au.com.heisenbergtech.scan.interop :as interop]
-            [au.com.heisenbergtech.scan.parse :as parse]))
+            [com.typemark.sift.concurrency :as concurrency]
+            [com.typemark.sift.interop :as interop]
+            [com.typemark.sift.parse :as parse]))
 
 (defn- nodes [s] (:nodes (parse/parse s)))
 (defn- rules-for [s] (set (map :rule (interop/all-findings (nodes s)))))

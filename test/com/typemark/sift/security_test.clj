@@ -1,10 +1,9 @@
-(ns au.com.heisenbergtech.scan.security-test
+(ns com.typemark.sift.security-test
   (:require [clojure.test :refer [deftest is testing]]
             [clojure.test.check.clojure-test :refer [defspec]]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
-            [au.com.heisenbergtech.sonar.metadata]
-            [au.com.heisenbergtech.scan.security :as security]))
+            [com.typemark.sift.security :as security]))
 
 (defn- rules-for [src] (set (map :rule (security/findings-of-source src))))
 
@@ -24,19 +23,6 @@
     (doseq [nm ["api-key" "db-password" "client-secret" "auth-token"]]
       (is (contains? (rules-for (str "(def " nm " \"aaaaaaaaaa\")")) "hardcoded-credential")
           nm))))
-
-(deftest every-rule-emitted-is-a-declared-rule
-  (let [declared (set (au.com.heisenbergtech.sonar.metadata/all-keys))
-        src "(def password \"hunter2hunter2\")
-             (eval (read-string (:params req)))
-             (sh \"sh\" \"-c\" (slurp u))
-             (jdbc/query db (str \"x\" y))
-             (java.util.Random.)
-             (MessageDigest/getInstance \"MD5\")
-             (resolve (symbol s))
-             (xml/parse s)"]
-    (is (every? declared (map :rule (security/findings-of-source src)))
-        "a finding whose rule is not registered would be dropped by Sonar")))
 
 (defspec never-throws-on-arbitrary-source 300
   (prop/for-all [s gen/string]

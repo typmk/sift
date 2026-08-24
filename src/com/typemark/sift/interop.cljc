@@ -1,4 +1,4 @@
-(ns au.com.heisenbergtech.scan.interop
+(ns com.typemark.sift.interop
   "Security rules for the Java libraries Clojure calls.
 
   The premise: Clojure runs on the JDK and reaches for the same
@@ -12,13 +12,13 @@
   null dereference, equals/hashCode, try-with-resources, mutable statics.
   Those are meaningless here. Nor most of Java's concurrency rules, since
   Clojure's defaults are immutable; the concurrency hazards Clojure DOES have
-  are its own, and live in au.com.heisenbergtech.scan.concurrency.
+  are its own, and live in com.typemark.sift.concurrency.
 
   Class names are resolved through the ns form's :import, so both
   `(MessageDigest/getInstance ...)` and
   `(java.security.MessageDigest/getInstance ...)` match the same rule."
   (:require [clojure.string :as str]
-            [au.com.heisenbergtech.scan.tree :as tree]))
+            [com.typemark.sift.tree :as tree]))
 
 (defn imports
   "simple class name -> fully qualified, from the ns form's :import clauses.

@@ -1,4 +1,4 @@
-(ns au.com.heisenbergtech.scan.dictionary
+(ns com.typemark.sift.dictionary
   "The project's own vocabulary, enforced.
 
   CLAUDE.md opens with `The enemy of progress is inconsistency` and carries a
@@ -12,7 +12,7 @@
 
   This is the one rule set no upstream analyzer will ever ship, because the
   vocabulary is this organisation's."
-  (:require [au.com.heisenbergtech.scan.json :as json]
+  (:require [com.typemark.sift.json :as json]
             [clojure.string :as str]))
 
 (def banned

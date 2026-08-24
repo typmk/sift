@@ -1,4 +1,4 @@
-(ns au.com.heisenbergtech.scan.concurrency
+(ns com.typemark.sift.concurrency
   "The concurrency hazards Clojure actually has.
 
   Most of Java's concurrency rules do not port: there is no `synchronized`
@@ -9,7 +9,7 @@
   What survives is narrower and specific to Clojure's coordination
   primitives, and it is the kind of defect that passes every test on a quiet
   machine and only appears under contention."
-  (:require [au.com.heisenbergtech.scan.tree :as tree]))
+  (:require [com.typemark.sift.tree :as tree]))
 
 (def ^:private retrying #{"swap!" "swap-vals!" "alter" "commute" "alter-var-root"})
 

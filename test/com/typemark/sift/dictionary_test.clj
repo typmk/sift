@@ -1,8 +1,8 @@
-(ns au.com.heisenbergtech.scan.dictionary-test
+(ns com.typemark.sift.dictionary-test
   (:require [clojure.set :as set]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
-            [au.com.heisenbergtech.scan.dictionary :as dictionary]))
+            [com.typemark.sift.dictionary :as dictionary]))
 
 (defn- analysis
   "clj-kondo's keywords analysis, in the shape the real report has."

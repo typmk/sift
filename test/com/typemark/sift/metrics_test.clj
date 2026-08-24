@@ -1,10 +1,10 @@
-(ns au.com.heisenbergtech.scan.metrics-test
+(ns com.typemark.sift.metrics-test
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [clojure.test.check.clojure-test :refer [defspec]]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
-            [au.com.heisenbergtech.scan.metrics :as metrics]))
+            [com.typemark.sift.metrics :as metrics]))
 
 (def sample
   (str "(ns example)\n"       "\n"       ";; a comment line\n"       "(defn f [x]\n"       "  (if (pos? x) :a :b))\n"       "(defn g [x] x) ; trailing comment\n"       "(defrecord R [a])\n"))

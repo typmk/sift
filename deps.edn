@@ -2,9 +2,28 @@
 ;;
 ;; Extracted from sonar-clojure, which now requires this rather than owning it.
 ;; The closure was computed rather than guessed: 15 namespaces reachable from
-;; the `scan` facade, and zero namespaces on the plugin side requiring any of
+;; the `sift` facade, and zero namespaces on the plugin side requiring any of
 ;; them directly. That second number is what made the extraction safe.
 {:paths ["src"]
  :deps  {org.clojure/clojure     {:mvn/version "1.12.0"}
          org.clojure/data.json   {:mvn/version "2.5.2"}
-         rewrite-clj/rewrite-clj {:mvn/version "1.2.55"}}}
+         rewrite-clj/rewrite-clj {:mvn/version "1.2.55"}}
+
+
+ ;; Its own suite, runnable from a clone of this repo alone. It was not, until
+ ;; sift was published: one assertion in security_test required
+ ;; au.com.heisenbergtech.sonar.metadata, so the whole file failed to load
+ ;; outside sonar-clojure's classpath and the other twenty-three tests never
+ ;; ran. That assertion is about Sonar's registry and now lives there.
+ ;;
+ ;; sonar-clojure ALSO runs these, via `-d ../sift/test` on its own :test
+ ;; alias. Two harnesses over one suite is deliberate: this one proves the
+ ;; library stands alone, that one proves it still fits the consumer.
+ :aliases
+ {:test
+  {:extra-paths ["test"]
+   :extra-deps  {org.clojure/test.check {:mvn/version "1.1.3"}
+                 io.github.cognitect-labs/test-runner
+                 {:git/tag "v0.5.1" :git/sha "dfb30dd"}}
+   :main-opts   ["-m" "cognitect.test-runner" "-d" "test"]
+   :exec-fn     cognitect.test-runner.api/test}}}

@@ -1,11 +1,11 @@
-(ns au.com.heisenbergtech.scan.analysis
+(ns com.typemark.sift.analysis
   "Turns clj-kondo's analysis output into a Sonar symbol table.
 
   This is the one place Clojure has an advantage: clj-kondo already emits
   var-definitions, var-usages, locals and local-usages with exact positions,
   so the symbol table is a reshaping of data that exists rather than a
   second parse of the source."
-  (:require [au.com.heisenbergtech.scan.json :as json]))
+  (:require [com.typemark.sift.json :as json]))
 
 (defn- span [m rk ck erk eck]
   (when (and (get m rk) (get m ck) (get m erk) (get m eck))

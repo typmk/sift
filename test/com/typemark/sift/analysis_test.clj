@@ -1,8 +1,8 @@
-(ns au.com.heisenbergtech.scan.analysis-test
+(ns com.typemark.sift.analysis-test
   (:require [clojure.test :refer [deftest is testing]]
-            [au.com.heisenbergtech.scan.analysis :as analysis]
-            [au.com.heisenbergtech.scan.highlight :as hl]
-            [au.com.heisenbergtech.scan.parse :as parse]))
+            [com.typemark.sift.analysis :as analysis]
+            [com.typemark.sift.highlight :as hl]
+            [com.typemark.sift.parse :as parse]))
 
 (def report
   (str "{\"analysis\":{"

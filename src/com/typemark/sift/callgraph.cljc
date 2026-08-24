@@ -1,10 +1,10 @@
-(ns au.com.heisenbergtech.scan.callgraph
+(ns com.typemark.sift.callgraph
   "Interprocedural taint propagation over clj-kondo's call graph.
 
   clj-kondo's analysis emits, for every var usage, the var it appeared in
   (`from-var`) and the var it refers to (`to`/`name`). That is a call graph,
   and it is what lifts taint tracking above the single-form case the
-  intraprocedural pass in `au.com.heisenbergtech.scan.security` is limited to.
+  intraprocedural pass in `com.typemark.sift.security` is limited to.
 
   The propagation is a fixpoint over two relations:
 
@@ -22,7 +22,7 @@
   tainted value never actually reached the sink argument. That is a
   deliberate over-approximation, and it is why these findings are reported at
   a lower confidence than the direct case rather than mixed in with it."
-  (:require [au.com.heisenbergtech.scan.json :as json]))
+  (:require [com.typemark.sift.json :as json]))
 
 (defn call-graph
   "analysis JSON -> {[ns var] #{[callee-ns callee-var]}} plus the position of

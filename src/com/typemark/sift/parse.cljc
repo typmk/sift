@@ -1,4 +1,4 @@
-(ns au.com.heisenbergtech.scan.parse
+(ns com.typemark.sift.parse
   "Parses Clojure source with rewrite-clj and flattens the tree into the
   annotated node stream every other namespace consumes.
 
@@ -14,7 +14,7 @@
   Positions are 1-based with `end-col` exclusive, matching both rewrite-clj
   and clj-kondo. Conversion to Sonar's 0-based offsets happens at the edge."
   (:require [clojure.string :as str]
-            [au.com.heisenbergtech.scan.forms :as forms]
+            [com.typemark.sift.forms :as forms]
             [rewrite-clj.node :as n]
             [rewrite-clj.parser :as p]))
 

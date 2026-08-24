@@ -1,4 +1,4 @@
-(ns au.com.heisenbergtech.scan.web
+(ns com.typemark.sift.web
   "Rules for the Clojure web stack -- hiccup, ring, reitit.
 
   This is the bucket Java fills with 103 Spring and JavaEE rules. The
@@ -10,7 +10,7 @@
   No generic analyzer ships these for Clojure, because they require knowing
   what hiccup's escaping guarantees are and where ring's middleware sits."
   (:require [clojure.string :as str]
-            [au.com.heisenbergtech.scan.tree :as tree]))
+            [com.typemark.sift.tree :as tree]))
 
 (def ^:private raw-html
   "Ways to put a string into a page without hiccup escaping it. Each exists

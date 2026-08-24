@@ -1,4 +1,4 @@
-(ns au.com.heisenbergtech.scan.regex
+(ns com.typemark.sift.regex
   "Regular-expression rules.
 
   Java ships 30 of these and Clojure had none, yet the exposure is identical:
@@ -10,7 +10,7 @@
   Detection is over the literal text, which is what the scanner has and what
   the engine will compile."
   (:require [clojure.string :as str]
-            [au.com.heisenbergtech.scan.tree :as tree]))
+            [com.typemark.sift.tree :as tree]))
 
 (def ^:private brace-nested
   "A brace-bounded repetition inside another: (a{1,9}){1,9}.

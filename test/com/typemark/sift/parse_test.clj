@@ -1,9 +1,9 @@
-(ns au.com.heisenbergtech.scan.parse-test
+(ns com.typemark.sift.parse-test
   (:require [clojure.test :refer [deftest is testing]]
             [clojure.test.check.clojure-test :refer [defspec]]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
-            [au.com.heisenbergtech.scan.parse :as parse]))
+            [com.typemark.sift.parse :as parse]))
 
 (defn- nodes [s] (:nodes (parse/parse s)))
 (defn- leaf-types [s] (mapv :type (remove #(= :trivia (:type %)) (parse/leaves (nodes s)))))

@@ -1,4 +1,4 @@
-(ns au.com.heisenbergtech.scan.forms
+(ns com.typemark.sift.forms
   "The one place a Clojure form's role is declared.
 
   Stated twice, these sets drift: `definline`, `defstruct` and `gen-class`

@@ -1,4 +1,4 @@
-(ns au.com.heisenbergtech.scan.json
+(ns com.typemark.sift.json
   "JSON reading, per platform.
 
   The only thing in this library that was not already portable. Everything

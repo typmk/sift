@@ -1,4 +1,4 @@
-(ns au.com.heisenbergtech.scan
+(ns com.typemark.sift
   "The analysis surface, named in one place.
 
   Everything under this namespace is Clojure analysis with no SonarQube in it:
@@ -22,19 +22,19 @@
   code it measures runs your side effects on the CI box. A REPL-side consumer
   that has already loaded the code is a different context and may rank higher;
   this surface is for the one that has not."
-  (:require [au.com.heisenbergtech.scan.access :as access]
-            [au.com.heisenbergtech.scan.analysis :as analysis]
-            [au.com.heisenbergtech.scan.callgraph :as callgraph]
-            [au.com.heisenbergtech.scan.concurrency :as concurrency]
-            [au.com.heisenbergtech.scan.dictionary :as dictionary]
-            [au.com.heisenbergtech.scan.highlight :as highlight]
-            [au.com.heisenbergtech.scan.interop :as interop]
-            [au.com.heisenbergtech.scan.metrics :as metrics]
-            [au.com.heisenbergtech.scan.parse :as p]
-            [au.com.heisenbergtech.scan.regex :as regex]
-            [au.com.heisenbergtech.scan.security :as security]
-            [au.com.heisenbergtech.scan.tests :as tests]
-            [au.com.heisenbergtech.scan.web :as web]))
+  (:require [com.typemark.sift.access :as access]
+            [com.typemark.sift.analysis :as analysis]
+            [com.typemark.sift.callgraph :as callgraph]
+            [com.typemark.sift.concurrency :as concurrency]
+            [com.typemark.sift.dictionary :as dictionary]
+            [com.typemark.sift.highlight :as highlight]
+            [com.typemark.sift.interop :as interop]
+            [com.typemark.sift.metrics :as metrics]
+            [com.typemark.sift.parse :as p]
+            [com.typemark.sift.regex :as regex]
+            [com.typemark.sift.security :as security]
+            [com.typemark.sift.tests :as tests]
+            [com.typemark.sift.web :as web]))
 
 ;; ── structure ──────────────────────────────────────────────────────────────
 
@@ -42,7 +42,7 @@
   "Source text -> {:ok? :nodes :error}.
 
   NOT `parse`. A var named `parse` on this namespace and the child namespace
-  au.com.heisenbergtech.scan.parse compile to the SAME JavaScript path, so in
+  com.typemark.sift.parse compile to the SAME JavaScript path, so in
   ClojureScript one silently overwrites the other and every call becomes
   \"parse is not a function\" at runtime. On the JVM they coexist, which is why
   this survived a green suite and a clean compile and only appeared when the

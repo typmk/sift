@@ -35,3 +35,11 @@ nothing should.
 
 Extracted from `hbtweb/sonar-clojure`, which carries the commits from before the
 split — this repo starts at the extraction.
+
+## Licence
+
+Eclipse Public License 2.0 — the same licence it carried inside sonar-clojure,
+where these files lived for 38 commits. The extraction moved the code and left
+the LICENSE file behind; this restores it rather than choosing anew. It matters
+because defnet's free tier is EPL-2.0 too and compiles this in, so an artifact
+containing unlicensed code would have shipped with no grant covering it.

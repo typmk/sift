@@ -12,7 +12,7 @@
 
   This is the one rule set no upstream analyzer will ever ship, because the
   vocabulary is this organisation's."
-  (:require [clojure.data.json :as json]
+  (:require [au.com.heisenbergtech.scan.json :as json]
             [clojure.string :as str]))
 
 (def banned

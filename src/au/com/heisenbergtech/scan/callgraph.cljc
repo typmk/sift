@@ -22,7 +22,7 @@
   tainted value never actually reached the sink argument. That is a
   deliberate over-approximation, and it is why these findings are reported at
   a lower confidence than the direct case rather than mixed in with it."
-  (:require [clojure.data.json :as json]))
+  (:require [au.com.heisenbergtech.scan.json :as json]))
 
 (defn call-graph
   "analysis JSON -> {[ns var] #{[callee-ns callee-var]}} plus the position of
@@ -104,8 +104,10 @@
        :filename (:filename a)
        :line (:line a) :col (:col a)
        :end-line (:end-line a) :end-col (:end-col a)
-       :message (format "%s/%s obtains attacker-influenced data and passes it toward a sink"
-                        (first caller) (second caller))
+       ;; `str` rather than `format`: format is JVM-only, and this namespace
+       ;; compiles to ClojureScript inside defnet.
+       :message (str (first caller) "/" (second caller)
+                     " obtains attacker-influenced data and passes it toward a sink")
        :flow (cond-> [{:line (:line a) :col (:col a)
                        :end-line (:end-line a) :end-col (:end-col a)
                        :message (if b

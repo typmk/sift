@@ -30,7 +30,7 @@
             [au.com.heisenbergtech.scan.highlight :as highlight]
             [au.com.heisenbergtech.scan.interop :as interop]
             [au.com.heisenbergtech.scan.metrics :as metrics]
-            [au.com.heisenbergtech.scan.parse :as parse]
+            [au.com.heisenbergtech.scan.parse :as p]
             [au.com.heisenbergtech.scan.regex :as regex]
             [au.com.heisenbergtech.scan.security :as security]
             [au.com.heisenbergtech.scan.tests :as tests]
@@ -38,9 +38,20 @@
 
 ;; ── structure ──────────────────────────────────────────────────────────────
 
-(defn parse    "Source text -> {:ok? :nodes :error}." [text] (parse/parse text))
-(defn leaves   "Token nodes, for CPD and highlighting."  [nodes] (parse/leaves nodes))
-(defn cpd-image "Duplication image for one token."       [text]  (parse/cpd-image text))
+(defn parse-source
+  "Source text -> {:ok? :nodes :error}.
+
+  NOT `parse`. A var named `parse` on this namespace and the child namespace
+  au.com.heisenbergtech.scan.parse compile to the SAME JavaScript path, so in
+  ClojureScript one silently overwrites the other and every call becomes
+  \"parse is not a function\" at runtime. On the JVM they coexist, which is why
+  this survived a green suite and a clean compile and only appeared when the
+  code was actually run under bun. No var here may share a name with a child
+  namespace segment."
+  [text]
+  (p/parse text))
+(defn leaves   "Token nodes, for CPD and highlighting."  [nodes] (p/leaves nodes))
+(defn cpd-image "Duplication image for one token."       [text]  (p/cpd-image text))
 (defn spans
   "Highlight spans over token nodes. The token CLASS is analysis; mapping it to
   a renderer's palette is the consumer's job, which is why this returns spans

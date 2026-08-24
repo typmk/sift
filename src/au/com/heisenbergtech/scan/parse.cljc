@@ -96,8 +96,11 @@
   (try
     {:ok? true
      :nodes (persistent! (walk (p/parse-string-all source) 0 false false 0 (transient [])))}
-    (catch Exception e
-      {:ok? false :error (.getMessage e)})))
+    ;; :default rather than js/Error on the cljs side: a reader error can be
+    ;; thrown as a plain value, and catching only js/Error would let it escape
+    ;; as an uncaught exception rather than becoming {:ok? false}.
+    (catch #?(:clj Exception :cljs :default) e
+      {:ok? false :error #?(:clj (.getMessage e) :cljs (ex-message e))})))
 
 (defn leaves
   "Nodes with no children: what highlighting and duplication are computed

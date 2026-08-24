@@ -5,7 +5,7 @@
   var-definitions, var-usages, locals and local-usages with exact positions,
   so the symbol table is a reshaping of data that exists rather than a
   second parse of the source."
-  (:require [clojure.data.json :as json]))
+  (:require [au.com.heisenbergtech.scan.json :as json]))
 
 (defn- span [m rk ck erk eck]
   (when (and (get m rk) (get m ck) (get m erk) (get m eck))

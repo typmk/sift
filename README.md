@@ -62,9 +62,11 @@ parameter is flagged; with it, the reverse. Measured on defnet: no change in
 17 findings — the input is there for codebases that need it, not because this
 one did.
 
-**The host boundary, as far as the source states it** — `host.cljc`:
-`catch-all-swallow`, `mutable-escape`, `js-prop-on-own-object` (counterpart
-`(aget o "k")`), `reflection-unwarned`. What the source cannot state, the
+**The host boundary, as far as the source states it** — `catch-all-swallow`
+and `mutable-escape` in `host.cljc` (shape questions), `js-prop-on-own-object`
+(counterpart `(aget o "k")`) and `reflection-unwarned` in `typeflow.cljc`
+(tag questions, on the same env as the predictions — and the move found
+that the old rule read only the member name and missed every `Class/static`). What the source cannot state, the
 host compiler writes with positions, and defnet's `ingest op=hostwarn` reads
 that log. On first contact `js-prop-on-own-object` found a `(set! (.-k props)
 …)` on a `#js` literal in defnet's viewer — the `:advanced` rename trap it
@@ -219,7 +221,7 @@ nothing should.
 
     clojure -M:test
 
-102 tests, 348 assertions. `sonar-clojure` runs the same files a second time
+103 tests, 351 assertions. `sonar-clojure` runs the same files a second time
 through its own `:test` alias (`-d ../sift/test`): this harness proves the
 library stands alone, that one proves it still fits the consumer.
 

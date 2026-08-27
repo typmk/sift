@@ -7,8 +7,16 @@
   (:require [clojure.test :refer [deftest is testing]]
             [com.typemark.sift.typeflow :as tf]))
 
-(defn- kinds [src] (mapv :kind (tf/predictions src "x.clj" :jvm)))
-(defn- at [src] (mapv (juxt :kind :column) (tf/predictions src "x.clj" :jvm)))
+(defn- preds [src] (remove #(= :reflection-unwarned (:kind %)) (tf/predictions src "x.clj" :jvm)))
+(defn- kinds [src] (mapv :kind (preds src)))
+(defn- at [src] (mapv (juxt :kind :column) (preds src)))
+
+(deftest the-file-rule-rides-beside-the-predictions
+  (is (some #(= :reflection-unwarned (:kind %)) (tf/predictions "(defn f [s] (.length s))" "x.clj" :jvm)))
+  (is (not-any? #(= :reflection-unwarned (:kind %))
+                (tf/predictions "(set! *warn-on-reflection* true)\n(defn f [^String s] (.length s))" "x.clj" :jvm)))
+  (testing "a static call counts as interop — the old host rule read only the member name and missed every Class/static"
+    (is (some #(= :reflection-unwarned (:kind %)) (tf/predictions "(defn f [s] (Integer/parseInt s))" "x.clj" :jvm)))))
 
 (deftest boxed-math-is-an-operand-the-compiler-cannot-unbox
   (testing "unhinted params box; hinted and literal operands do not"

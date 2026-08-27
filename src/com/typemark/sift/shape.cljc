@@ -24,6 +24,7 @@
             [com.typemark.sift.loop-fold :as loop-fold]
             [com.typemark.sift.map-loop :as map-loop]
             [com.typemark.sift.resolve :as resolve]
+            [com.typemark.sift.typeflow :as typeflow]
             [rewrite-clj.parser :as parser]
             [rewrite-clj.zip :as z]))
 
@@ -40,8 +41,8 @@
    ;; the host boundary — see host.cljc
    :catch-all-swallow     (:catch-all-swallow host/rules)
    :mutable-escape        (:mutable-escape host/rules)
-   :js-prop-on-own-object (:js-prop-on-own-object host/rules)
-   :reflection-unwarned   (:reflection-unwarned host/rules)}
+   :js-prop-on-own-object (:js-prop-on-own-object typeflow/rules)
+   :reflection-unwarned   (:reflection-unwarned typeflow/rules)}
   ;; rules.edn — each carries its own category and instruction
   (into {} (map (fn [{:keys [id category instruction]}] [id {:category category :instruction instruction}])) data/rules)))
 
@@ -69,7 +70,10 @@
                   (into (loop-fold/findings file zloc taken))
                   (into (cond-case/findings file zloc))
                   (into (host/findings file zloc))
-                  (into (data/findings file zloc)))))
+                  (into (data/findings file zloc))
+                  ;; the two host rules that live in typeflow's env
+                  (into (filter #(contains? #{:js-prop-on-own-object :reflection-unwarned} (:rule %))
+                                (typeflow/findings text file))))))
       [])))
 
 (defn findings

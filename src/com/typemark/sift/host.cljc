@@ -32,10 +32,8 @@
                            :instruction "Do not turn a host exception into a constant. Return the failure as data — (ex-info …), {:error …}, or nil with the cause logged — or let it propagate."}
    :mutable-escape        {:category :design
                            :instruction "Do not return a host mutable. Convert at the boundary — (vec …), (into {} …), (js->clj …) — so callers receive a value."}
-   :js-prop-on-own-object {:category :warning
-                           :instruction "Read your own #js object with (aget obj \"k\"): #js writes a quoted key and .-k a renamable one, and :advanced renames one side."}
-   :reflection-unwarned   {:category :warning
-                           :instruction "Add (set! *warn-on-reflection* true) after the ns form so the compiler reports each reflective interop call."}})
+   ;; :js-prop-on-own-object and :reflection-unwarned: see typeflow/rules
+   })
 
 ;; ---- catch-all-swallow ------------------------------------------------------
 
@@ -113,70 +111,9 @@
      :message (str (or nm "fn") " returns a host mutable; callers will assume a value")
      :applicability :unspecified}))
 
-;; ---- js-prop-on-own-object --------------------------------------------------
-
-(defn- own-js-binding?
-  "The rhs of a let binding builds a JS object here: #js, clj->js, js-obj."
-  [rhs]
-  (let [c (peel rhs)]
-    (or (and (= :reader-macro (z/tag c)) (= "js" (some-> (z/down c) z/string)))
-        (contains? #{"clj->js" "js-obj"} (head-name c)))))
-
-(defn- js-prop-on-own-object [file zloc]
-  (for [l (collect zloc #(contains? #{"let" "let*"} (head-name %)))
-        :when (inside-defn? l)
-        :let [vz (binder-vec l)]
-        :when vz
-        [lhs rhs] (vec-pairs vz)
-        :let [nm (token-name lhs)]
-        :when (and nm (own-js-binding? rhs))
-        r (collect l (fn [c] (let [n (head-name c)]
-                               (and n (str/starts-with? n ".-")
-                                    (= nm (some-> (children (peel c)) second token-name))))))
-        :let [prop (subs (head-name r) 2)
-              [line col] (or (pos-of r) [nil nil])]]
-    {:rule :js-prop-on-own-object :file file :line line :column col
-     :symbol (symbol nm) :shape :js-prop-on-own-object
-     :message (str ".-" prop " on " nm ", which #js built here: :advanced renames one side")
-     :applicability :machine-applicable
-     :counterpart (list 'aget (symbol nm) prop)}))
-
-;; ---- reflection-unwarned ----------------------------------------------------
-
-(defn- interop-head?
-  "`.method`, `Class/static`, `Class.`, `new` — a call the JVM compiler must
-  resolve against a class."
-  [n]
-  (and n
-       (or (str/starts-with? n ".")
-           (= n "new")
-           (str/ends-with? n ".")
-           ;; `Class/static`: a capitalised namespace part. A regex, not
-           ;; Character/isUpperCase — that is JVM-only and the reader this
-           ;; rule feeds (op=hostwarn) reported it undeclared under cljs.
-           (boolean (re-find #"^[A-Z][^/]*/" n)))))
-
-(defn- jvm-file? [file]
-  (and file (or (str/ends-with? file ".clj") (str/ends-with? file ".cljc"))))
-
-(defn- reflection-unwarned [file zloc]
-  (when (jvm-file? file)
-    (let [interop (collect zloc #(and (z/list? (peel %)) (interop-head? (head-name %))))
-          warned? (some (fn [c] (and (= "set!" (head-name c))
-                                     (= "*warn-on-reflection*"
-                                        (some-> (children (peel c)) second peel z/string))))
-                        (collect zloc #(= "set!" (head-name %))))]
-      (when (and (seq interop) (not warned?))
-        (let [[line col] (or (pos-of (first interop)) [1 1])]
-          [{:rule :reflection-unwarned :file file :line line :column col
-            :symbol '*warn-on-reflection* :shape :reflection-unwarned
-            :message (str (count interop) " interop calls and no (set! *warn-on-reflection* true); reflective ones are silent")
-            :applicability :unspecified
-            :counterpart '(set! *warn-on-reflection* true)}])))))
-
 (defn findings
+  "The two shape rules. js-prop-on-own-object and reflection-unwarned are
+  tag questions and moved to typeflow.cljc (DEFNET-57)."
   [file zloc]
   (-> (vec (catch-all-swallow file zloc))
-      (into (mutable-escape file zloc))
-      (into (js-prop-on-own-object file zloc))
-      (into (reflection-unwarned file zloc))))
+      (into (mutable-escape file zloc))))

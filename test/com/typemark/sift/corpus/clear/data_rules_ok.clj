@@ -1,5 +1,8 @@
 (ns data-rules-ok)
 
+;; the file has a static call; without this the (correct) reflection-unwarned fires
+(set! *warn-on-reflection* true)
+
 (defn a [t x] (when t x))
 (defn b [t x y] (if-not t x y))
 (defn c [t x] (when-not t (println x) x))

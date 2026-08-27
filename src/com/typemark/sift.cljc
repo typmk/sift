@@ -139,7 +139,7 @@
   [family category f]
   (-> f
       (update :rule #(if (keyword? %) % (keyword %)))
-      (assoc :family family)
+      (update :family #(or % family))
       (update :category #(or % category))
       (update :applicability #(or % :unspecified))
       (update :instruction #(or % (:message f)))))
@@ -188,9 +188,11 @@
                                              :instruction "Split the unit: one branch per helper, or lift the nested lambda that carries the score."))
                         (complexity/findings text path))
             doc    (map #(normalize :prose :readability %) (prose-for prose path))
-            flow   (map #(normalize :typeflow :warning
-                                    (assoc % :instruction "Hint the receiver or operands (^String s, ^long n), or cast (long x); the host compiler takes the slow path where the tag runs out."))
-                        (typeflow/findings text path {:var-tags var-tags :resolution resolution}))]
+            flow   (->> (typeflow/findings text path {:var-tags var-tags :resolution resolution})
+                        ;; the two host rules already arrive via shape/findings
+                        (remove #(contains? #{:js-prop-on-own-object :reflection-unwarned} (:rule %)))
+                        (map #(normalize :typeflow :warning
+                                         (assoc % :instruction "Hint the receiver or operands (^String s, ^long n), or cast (long x); the host compiler takes the slow path where the tag runs out."))))]
         {:ok? true
          :findings (vec (concat node shape over doc flow))
          :units (if (:ok? cx) (:functions cx) [])

@@ -90,11 +90,21 @@
         (map? form) (some-> (or (:tag form) (get form 'tag)) str)
         :else nil))))
 
+(defn- js-literal?
+  "`#js {…}` / `#js […]` — an object the code built, whose keys are quoted
+  and whose `.-k` reads are renamed by :advanced."
+  [zloc]
+  (let [c (peel zloc)]
+    (or (and (= :reader-macro (z/tag c)) (= "js" (some-> (z/down c) z/string)))
+        (contains? #{"clj->js" "js-obj"} (head-name c)))))
+
 (defn- literal-tag [host zloc]
   (let [c (peel zloc)
         t (z/tag c)
         lit (get-in hosts [host :literal])]
-    (case t
+    (if (js-literal? c)
+      "js-literal"
+      (case t
       :vector (:vector lit)
       :map (:map lit)
       :set (:set lit)
@@ -110,7 +120,7 @@
                  (integer? s) (:int lit)
                  (number? s) (:float lit)
                  :else nil))
-      nil)))
+      nil))))
 
 (defn- param-env
   "[^String s ^long n m] -> {\"s\" \"String\" \"n\" \"long\" \"m\" nil}."
@@ -337,6 +347,16 @@
                           (let [tags (map #(tag-of host env %) (rest kids))]
                             (when-not (every? #(primitive? host %) tags)
                               (emit! :boxed-math c {:op h :tags (vec tags)}))))
+                        ;; (.-k o) on an object #js built here: the extern trap.
+                        ;; A rule, not a compiler prediction, so it emits
+                        ;; whatever :warns says; counterpart (aget o "k").
+                        (when (and (= :field (interop-kind host h)) (second kids)
+                                   (= "js-literal" (tag-of host env (second kids))))
+                          (let [[line col] (or (pos-of c) [nil nil])
+                                nm (some-> (second kids) peel z/string)]
+                            (vswap! out conj {:kind :js-prop-on-own-object :line line :column col
+                                              :op h :receiver nm :prop (subs h 2)
+                                              :counterpart (list 'aget (symbol nm) (subs h 2))})))
                         (when-let [ik (interop-kind host h)]
                           (when-let [recv (second kids)]
                             (when-not (receiver-known? host env recv)
@@ -388,6 +408,24 @@
                          (some (fn [[k v]] (when (or (str/ends-with? (str path) k) (str/ends-with? k (str path))) v)) resolution))]
      (predictions* text path host))))
 
+(defn- reflection-unwarned
+  "A JVM file with interop calls and no (set! *warn-on-reflection* true):
+  every reflective call in it is silent. File-level, one finding."
+  [host zloc path]
+  (when (= :jvm host)
+    (let [interop (collect zloc (fn [c] (let [f (head-full c)]
+                                          (and f (or (interop-kind host (head* c))
+                                                     (re-find (re-pattern (get-in hosts [host :interop :static])) f)
+                                                     (re-find (re-pattern (get-in hosts [host :interop :ctor])) f))))))
+          warned? (some (fn [c] (and (= "set!" (head-name c))
+                                     (= "*warn-on-reflection*" (some-> (children c) second peel z/string))))
+                        (collect zloc #(= "set!" (head-name %))))]
+      (when (and (seq interop) (not warned?))
+        (let [[line col] (or (pos-of (first interop)) [1 1])]
+          [{:kind :reflection-unwarned :line line :column col :file path
+            :count (count interop)
+            :counterpart '(set! *warn-on-reflection* true)}])))))
+
 (defn- predictions*
   [text path host]
   (let [zloc (try (z/of-string text {:track-position? true})
@@ -395,22 +433,46 @@
         zloc (when zloc (z/up zloc))]
     (if-not zloc
       []
-      (vec (for [d (defn-forms zloc)
-                 :let [nm (some-> (children d) second token-name)]
-                 p (predictions-in host {} d)]
-             (assoc p :in nm :file path))))))
+      (-> (vec (for [d (defn-forms zloc)
+                     :let [nm (some-> (children d) second token-name)]
+                     p (predictions-in host {} d)]
+                 (assoc p :in nm :file path)))
+          (into (reflection-unwarned host zloc path))))))
+
+(def rules
+  "The two host rules that are tag questions live here beside the compiler
+  predictions — they need the same env. catch-all-swallow and
+  mutable-escape are shape questions and stay in host.cljc."
+  {:js-prop-on-own-object {:category :warning
+                           :instruction "Read your own #js object with (aget obj \"k\"): #js writes a quoted key and .-k a renamable one, and :advanced renames one side."}
+   :reflection-unwarned   {:category :warning
+                           :instruction "Add (set! *warn-on-reflection* true) after the ns form so the compiler reports each reflective interop call."}})
 
 (defn findings
-  "Predictions as findings, one rule per kind under :typeflow/. `opts` as
-  for `predictions`: {:var-tags {} :resolution idx}."
+  "Predictions as findings, one rule per kind under :typeflow/, plus the two
+  host rules above under their own ids. `opts` as for `predictions`:
+  {:var-tags {} :resolution idx}."
   ([text path] (findings text path nil))
   ([text path opts]
-  (for [{:keys [kind line column op tags receiver in]} (predictions text path (host-of path) opts)]
-    {:rule (keyword "typeflow" (name kind))
-     :line line :column column
-     :symbol (some-> in symbol)
-     :message (case kind
-                :boxed-math (str op " over " (str/join ", " (map #(or % "Object") tags)) " boxes; hint or cast the operands")
-                :reflection (str op " on " receiver " reflects; its tag is not known here")
-                :uninferred (str op " on " receiver ": Closure cannot infer the target; hint ^js or use a js/ global"))
-     :applicability :unspecified})))
+   (for [{:keys [kind line column op tags receiver in prop counterpart count]} (predictions text path (host-of path) opts)]
+     (case kind
+       :js-prop-on-own-object
+       {:rule :js-prop-on-own-object :family :typeflow :line line :column column
+        :symbol (some-> receiver symbol) :shape :js-prop-on-own-object
+        :message (str ".-" prop " on " receiver ", which #js built here: :advanced renames one side")
+        :applicability :machine-applicable :counterpart counterpart
+        :category :warning :instruction (get-in rules [:js-prop-on-own-object :instruction])}
+       :reflection-unwarned
+       {:rule :reflection-unwarned :family :typeflow :line line :column column
+        :symbol '*warn-on-reflection* :shape :reflection-unwarned
+        :message (str count " interop calls and no (set! *warn-on-reflection* true); reflective ones are silent")
+        :applicability :unspecified :counterpart counterpart
+        :category :warning :instruction (get-in rules [:reflection-unwarned :instruction])}
+       {:rule (keyword "typeflow" (name kind)) :family :typeflow
+        :line line :column column
+        :symbol (some-> in symbol)
+        :message (case kind
+                   :boxed-math (str op " over " (str/join ", " (map #(or % "Object") tags)) " boxes; hint or cast the operands")
+                   :reflection (str op " on " receiver " reflects; its tag is not known here")
+                   :uninferred (str op " on " receiver ": Closure cannot infer the target; hint ^js or use a js/ global"))
+        :applicability :unspecified}))))

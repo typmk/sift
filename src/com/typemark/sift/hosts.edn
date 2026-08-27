@@ -142,10 +142,10 @@
        :math #{}
        :interop {:instance-call "^\\.[^-]" :field "^\\.-" :static "^js/" :ctor "\\.$"}
        :known-receiver #{"js"}
-       ;; NOTHING, measured. Modelled as "member access on a receiver without
-       ;; ^js or a js/ global", :uninferred predicted 648 sites in defnet src
-       ;; against a Closure log with 0 :infer-warning — Closure warns only for
-       ;; an extern it cannot infer under :infer-externs, not for every
-       ;; unhinted interop. Until a model matches that question, this host
-       ;; predicts nothing; defnet's op=hostwarn reads Closure's own answer.
-       :warns #{}}}
+       ;; cljs.analyzer/analyze-dot warns :infer-warning when the target's
+       ;; inferred tag is nil or any; shadow-cljs's :infer-externs :auto then
+       ;; keeps only the properties Closure's default externs do not already
+       ;; declare (typeflow/*externs*, from bin/externs). The 648-vs-0 that
+       ;; switched this host off was an EMPTY oracle — defnet's source was
+       ;; already clean — judging a model; the viewer at 92270f9^ has 42.
+       :warns #{:uninferred}}}

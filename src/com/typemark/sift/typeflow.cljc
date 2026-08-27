@@ -262,6 +262,15 @@
   \"host\": known, unnamed."
   nil)
 
+(def ^:dynamic *externs*
+  "The property names Closure's default externs already declare — a set,
+  from bin/externs. shadow-cljs's :infer-externs :auto warns for a member
+  access on an untyped target ONLY when the property is not among them:
+  (.beginPath ctx) on an untyped ctx is silent because every browser extern
+  has beginPath, and (.-sameNs d) is not. Measured on the viewer at 92270f9^:
+  the model without this set predicted 262 for 42, all 42 among them."
+  nil)
+
 (def ^:dynamic *imports*
   "{simple full} from the file's ns :import — how a simple name with two
   classes behind it (lume: java.util.Date and java.sql.Date) is resolved,
@@ -279,6 +288,25 @@
       (or (get table t)
           (get table (get *imports* (simple-name t)))
           (when (= 1 (count fulls)) (get table (first fulls)))))))
+
+(defn- js-aliases-of
+  "Aliases and referred names from STRING requires — (:require [\"d3\" :as d3]
+  [\"@cosmograph/cosmos\" :refer [Graph]]) — which shadow-cljs tags `js`:
+  `d3`, `d3/scaleSequential` and `Graph` are known receivers. A symbol
+  require is a cljs namespace and its vars are typed by their own tags."
+  [zloc]
+  (let [ns-form (some->> (when zloc (collect zloc #(= "ns" (head-name %)))) first)
+        form (when ns-form (sexpr ns-form ::no))]
+    (if (or (nil? form) (= ::no form) (not (seq? form)))
+      #{}
+      (into #{}
+            (for [c (rest form) :when (and (seq? c) (= :require (first c)))
+                  spec (rest c) :when (and (vector? spec) (string? (first spec)))
+                  :let [opts (apply hash-map (rest spec))]
+                  nm (concat (when-let [a (:as opts)] [a]) (:refer opts))]
+              (str nm))))))
+
+(def ^:dynamic *js-aliases* #{})
 
 (defn- imports-of
   "{simple full} from an ns form's :import clauses."
@@ -507,6 +535,8 @@
               ;; agentia: (.digest (MessageDigest/getInstance …)) does not
               ;; reflect; (.getBytes (minify text)) does.
               ;; a host member the table knows returns a primitive or a class
+              ;; (d3/scaleSequential) — a call through a string-require alias is js
+              (and (= host :js) (head-full c) (contains? *js-aliases* (str (namespace (symbol (head-full c)))))) "host"
               ;; a static call: the dump judges it first — (Math/abs boxed) answers
               ;; a boxed Number where the hand table below says double; the
               ;; table is the text-only fallback. Undumped is known, unnamed.
@@ -633,7 +663,9 @@
                             ;; a member step
                             ik
                             (if-not (known? cur)
-                              (do (emit (if (= host :js) :uninferred :reflection) at {:op sh :interop ik :receiver recv}) nil)
+                              (do (when-not (and (= host :js) *externs* (contains? *externs* (subs sh (if (= :field ik) 2 1))))
+                                    (emit (if (= host :js) :uninferred :reflection) at {:op sh :interop ik :receiver recv}))
+                                  nil)
                               (let [j (when (= :instance-call ik) (judge-method host cur (subs sh 1) arg-tags))]
                                 (case (:status j)
                                   :reflect (do (emit :reflection at {:op sh :interop :overload :receiver recv :tags (vec arg-tags)}) nil)
@@ -676,9 +708,13 @@
 
 (defn- receiver-known? [host env zloc]
   (let [t (tag-of host env zloc)
-        nm (token-name (peel zloc))]
+        nm (token-name (peel zloc))
+        full (some-> (peel zloc) (sexpr ::no) (#(when (symbol? %) (str %))))]
     (or (known? t)
         (and nm (str/starts-with? nm "js/"))
+        ;; d3 / d3/scaleSequential / Graph from a string require
+        (and full (= host :js) (or (contains? *js-aliases* full)
+                                   (contains? *js-aliases* (namespace (symbol full)))))
         (and nm (contains? (get-in hosts [host :known-receiver]) (hint-of zloc))))))
 
 (defn- predictions-in
@@ -857,8 +893,9 @@
                         (when-let [ik (interop-kind host h)]
                           (when-let [recv (second kids)]
                             (if-not (receiver-known? host env recv)
-                              (emit! (if (= host :js) :uninferred :reflection) c
-                                     {:op h :interop ik :receiver (some-> recv peel z/string)})
+                              (when-not (and (= host :js) *externs* (contains? *externs* (subs h (if (= :field ik) 2 1))))
+                                (emit! (if (= host :js) :uninferred :reflection) c
+                                       {:op h :interop ik :receiver (some-> recv peel z/string)}))
                               ;; known receiver: the dump judges the overload
                               (when (and (= host :jvm) (= ik :instance-call))
                                 (let [tags (map #(tag-of host env %) (drop 2 kids))
@@ -943,9 +980,10 @@
   see `*var-tags*` and `*resolve*`."
   ([text path] (predictions text path (host-of path)))
   ([text path host] (predictions text path host nil))
-  ([text path host {:keys [var-tags classes resolution]}]
+  ([text path host {:keys [var-tags classes externs resolution]}]
    (binding [*var-tags* var-tags
              *classes* classes
+             *externs* externs
              *resolve* (when resolution
                          (some (fn [[k v]] (when (or (str/ends-with? (str path) k) (str/ends-with? k (str path))) v)) resolution))]
      (predictions* text path host))))
@@ -976,7 +1014,8 @@
     (if-not zloc
       []
       (binding [*ns-name* (ns-name-of zloc)
-                *imports* (imports-of zloc)]
+                *imports* (imports-of zloc)
+                *js-aliases* (js-aliases-of zloc)]
        ;; EVERY top-level form: the compiler compiles (register-converter :k
        ;; (fn [bpm] (/ 60000 bpm))) as surely as a defn, and kora's ten misses
        ;; were all inside one. :in is the def's name where there is one, else

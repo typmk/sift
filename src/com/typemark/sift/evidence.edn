@@ -19,7 +19,7 @@
  {;; typeflow — bin/falsify, four corpora, 2026-08-27
   :typeflow/boxed-math   {:evidence :compiler :note "six corpora, 3,351 notes, all matched after reading; blind first scores: clojure-mcp 79/79, darling 38/39, kora P 0.82 R 0.99 — README table"}
   :typeflow/reflection   {:evidence :compiler :note "six corpora, 285 notes, all matched after reading; blind first scores: clojure-mcp P 0.92 R 0.75, darling P 0.85 R 0.85, kora P 0.71 R 0.88 — README table"}
-  :typeflow/uninferred   {:evidence :compiler :note "648 predicted vs 0 Closure warnings on defnet: the JS model is wrong and predicts nothing"}
+  :typeflow/uninferred   {:evidence :compiler :note "viewer at defnet 92270f9^, 42 :infer-warnings: P 0.84 R 1.00 with Closure's externs (bin/externs); the 8 left are names shadow knows from somewhere neither the externs nor npm sources explain — corpora/defnet-viewer-old.edn"}
   :js-prop-on-own-object {:evidence :corpus :note "found render.cljs:367 shipped; corpus flag/clear"}
   :reflection-unwarned   {:evidence :corpus}
   ;; complexity
@@ -49,13 +49,22 @@
   :xml-external-entity {:evidence :read :note "0 hits"}
   :operator-as-party {:evidence :read :note "0 hits; lume-specific by construction"}
   :discarded-future {:evidence :read :note "0 hits"}
-  :redos-vulnerable-regex {:evidence :unjudged} :partial-match-validation {:evidence :unjudged}
-  :cookie-missing-security-flags {:evidence :unjudged} :sensitive-data-logged {:evidence :unjudged}
-  :xss-unescaped-output {:evidence :unjudged}
-  :trust-all-certificates {:evidence :unjudged} :unsafe-deserialization {:evidence :unjudged}
-  :jndi-injection {:evidence :unjudged} :predictable-temp-file {:evidence :unjudged}
-  :disallow-doctype-decl {:evidence :unjudged} :external-general-entities {:evidence :unjudged}
-  :external-parameter-entities {:evidence :unjudged} :load-external-dtd {:evidence :unjudged}
-  :empty-test {:evidence :unjudged} :testing-without-assertion {:evidence :unjudged} :test-with-no-effect {:evidence :unjudged}
-  :banned-term {:evidence :unjudged}
+  ;; a flag/clear pair each, in node_rules_test (moved home from
+  ;; sonar-clojure 2026-08-27), security_test, interop_test, dictionary_test.
+  ;; A pair proves the rule fires and stays silent; it does not say how it
+  ;; does on real code — none of these hit on six corpora, which is not
+  ;; evidence either way. :corpus is the rung; a reading would raise it.
+  :redos-vulnerable-regex {:evidence :corpus :note "node_rules_test; measured 0/11 true positives once, before the brace-nesting rule"}
+  :partial-match-validation {:evidence :corpus :note "node_rules_test"}
+  :cookie-missing-security-flags {:evidence :corpus :note "node_rules_test"}
+  :sensitive-data-logged {:evidence :corpus :note "node_rules_test"}
+  :xss-unescaped-output {:evidence :corpus :note "node_rules_test"}
+  :trust-all-certificates {:evidence :corpus :note "security_test"}
+  :unsafe-deserialization {:evidence :corpus :note "security_test"}
+  :jndi-injection {:evidence :corpus :note "node_rules_test; the static form only — the instance form needs the receiver's type"}
+  :predictable-temp-file {:evidence :corpus :note "security_test"}
+  :empty-test {:evidence :corpus :note "node_rules_test"}
+  :testing-without-assertion {:evidence :corpus :note "node_rules_test"}
+  :test-with-no-effect {:evidence :corpus :note "node_rules_test"}
+  :banned-term {:evidence :corpus :note "dictionary_test"}
   :unparseable {:evidence :corpus :note "not a rule: the file did not read"}}}

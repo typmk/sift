@@ -31,11 +31,12 @@
   (printf "%-12s %-10s %-11s %s%n" "corpus" "role" "kind" "oracle predicted tp fp fn  precision recall")
   (doseq [{:keys [name root oracle role]} manifests
           :let [root (expand root) oracle (expand oracle)]]
-    (if-not (and (fs/exists? (str oracle "/notes.edn")) (fs/exists? root))
+    (if-not (and (or (fs/exists? (str oracle "/notes.edn")) (fs/exists? (str oracle "/closure.log"))) (fs/exists? root))
       (printf "%-12s %-10s SKIPPED — %s%n" name (clojure.core/name role)
               (if (fs/exists? root) (str "no oracle at " oracle " (run bin/oracle in the project)") (str "no source at " root)))
-      (doseq [kind ["boxed-math" "reflection"]]
-        (let [{:keys [out]} (p/sh {:dir root} "bb" (str here "/bin/falsify") (str oracle "/notes.edn") kind "." "." "--oracle" oracle)
+      (doseq [kind (if (fs/exists? (str oracle "/closure.log")) ["uninferred"] ["boxed-math" "reflection"])]
+        (let [notes (if (fs/exists? (str oracle "/closure.log")) (str oracle "/closure.log") (str oracle "/notes.edn"))
+              {:keys [out]} (p/sh {:dir root} "bb" (str here "/bin/falsify") notes kind "." "." "--oracle" oracle)
               line (first (filter #(str/starts-with? % (str ":" kind)) (str/split-lines out)))
               pr (first (filter #(str/starts-with? % "precision") (str/split-lines out)))
               nums (when line (re-seq #"\d+" line))]

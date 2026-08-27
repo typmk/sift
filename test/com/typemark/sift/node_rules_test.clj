@@ -1,0 +1,134 @@
+(ns com.typemark.sift.node-rules-test
+  "A flag/clear pair per node rule — the corpus gate the shape and typeflow
+  families already have, for the families that predate them. These lived
+  in sonar-clojure's rules_detection_test until 2026-08-27, which meant a
+  clone of this library alone never ran them; sonar still runs this suite
+  through its -d ../sift/test alias. A positive alone proves a rule can
+  fire, which a rule matching everything also does — so every rule gets
+  both, and evidence.edn's :corpus rung for these rules means THIS file."
+  (:require [clojure.test :refer [deftest is testing]]
+            [com.typemark.sift.access :as access]
+            [com.typemark.sift.interop :as interop]
+            [com.typemark.sift.parse :as parse]
+            [com.typemark.sift.regex :as regex]
+            [com.typemark.sift.tests :as tests]
+            [com.typemark.sift.web :as web]))
+
+(defn- rules [f src] (set (map :rule (f (:nodes (parse/parse src))))))
+
+(defn- fires
+  "Asserts `rule` is raised for `bad` and not for `good` -- the pair, always."
+  [f rule bad good]
+  (is (contains? (rules f bad) rule) (str rule " missed: " (pr-str bad)))
+  (is (not (contains? (rules f good) rule))
+      (str rule " false positive on: " (pr-str good))))
+
+;; ---------------------------------------------------------------- access
+
+(deftest ambiguous-owner-check
+  (testing "nil owner means both untenanted and unresolved, and a two-valued test sends both down one branch"
+    (fires access/findings "ambiguous-owner-check"
+           "(defn h [o] (if (nil? (:obj/owner o)) (throw (ex-info \"no\" {})) :ok))"
+           "(defn h [o] (case (owner-of o) ::unresolved (throw (ex-info \"no\" {})) :ok))")))
+
+(deftest unscoped-tenant-query
+  (fires access/findings "unscoped-tenant-query"
+         "(d/q '[:find ?e :where [?e :product/sku]] db)"
+         "(d/q '[:find ?e :in $ ?owner :where [?e :obj/owner ?owner]] db o)")
+  (testing "a pull takes an entity id the caller already holds — 40 of 124 findings on lume, sur and forma, not one a scan"
+    (is (empty? (rules access/findings "(d/pull db '[*] eid)"))))
+  (testing "the shared taxonomy layer has no tenant to name"
+    (is (empty? (rules access/findings "(d/q '[:find ?e :where [?e :taxon/factor _]] db)"))))
+  (testing "a query naming no attribute says nothing either way; the safer reading keeps it"
+    (is (contains? (rules access/findings "(d/q query db)") "unscoped-tenant-query")))
+  (testing "vacuous over a corpus that never names a tenant — :tenanted? false, from sift/tenanted?"
+    (is (empty? (set (map :rule (access/findings (:nodes (parse/parse "(d/q query db)")) :tenanted? false)))))))
+
+(deftest operator-as-party
+  (fires access/findings "operator-as-party"
+         "(def p {:party/platform-role :admin})"
+         "(def p {:party/uuid id})"))
+
+;; ----------------------------------------------------------------- regex
+
+(deftest redos-vulnerable-regex
+  (testing "brace-nested quantifiers, the shape that actually backtracks"
+    (fires regex/findings "redos-vulnerable-regex"
+           "(def p #\"(a{1,9}){1,9}\")"
+           "(def p #\"^[a-z]+$\")")))
+
+(deftest partial-match-validation
+  (testing "re-find succeeds on a PARTIAL match; an unanchored pattern in a decision position accepts anything containing one"
+    (fires regex/findings "partial-match-validation"
+           "(defn ok? [s] (when (re-find #\"good\\\\.example\" s) :yes))"
+           "(defn ok? [s] (when (re-find #\"^good$\" s) :yes))")))
+
+;; ------------------------------------------------------------------- web
+
+(deftest xss-unescaped-output
+  (fires web/findings "xss-unescaped-output"
+         "(h/raw (str \"<b>\" x \"</b>\"))"
+         "(h/raw \"<hr>\")"))
+
+(deftest csrf-protection-absent
+  (fires web/findings "csrf-protection-absent"
+         "(ns app.routes (:require [reitit.ring :as ring]))\n(def routes [[\"/pay\" {:post handler}]])"
+         (str "(ns app.routes (:require [reitit.ring :as ring]"
+              " [ring.middleware.anti-forgery :as af]))\n"
+              "(def routes [[\"/pay\" {:post handler}]])"))
+  (testing "a method keyword as an argument or a dispatch-table key is not a route — lume"
+    (is (empty? (rules web/findings "(ns app.routes (:require [reitit.ring :as ring]))\n(defn f [db] (crud-decision db :delete 1))")))
+    (is (empty? (rules web/findings "(ns app.routes (:require [reitit.ring :as ring]))\n(def ops {:delete (partial delete-op conn)})")))))
+
+(deftest sensitive-data-logged
+  (fires web/findings "sensitive-data-logged"
+         "(log/info \"tok\" auth-token)"
+         "(log/info \"count\" n)"))
+
+(deftest cookie-missing-security-flags
+  (fires web/findings "cookie-missing-security-flags"
+         "(def c {:cookies {\"sid\" {:value v :max-age 3600}}})"
+         "(def c {:cookies {\"sid\" {:value v :max-age 3600 :http-only true :secure true}}})"))
+
+;; ----------------------------------------------------------------- tests
+
+(deftest empty-test
+  (fires tests/findings "empty-test"
+         "(deftest nothing (println :hi))"
+         "(deftest something (is (= 1 1)))")
+  (testing "a deftest delegating to a helper that asserts is not empty; one delegating to a helper that does not, is"
+    (is (empty? (rules tests/findings "(defn- fires [a b] (is (= a b)))\n(deftest x (testing \"t\" (fires 1 1)))")))
+    (is (contains? (rules tests/findings "(defn- noop [a] a)\n(deftest x (noop 1))") "empty-test"))))
+
+(deftest testing-without-assertion
+  (fires tests/findings "testing-without-assertion"
+         "(deftest t (is (= 1 1)) (testing \"nothing\" (println :x)))"
+         "(deftest t (testing \"ok\" (is (= 1 1))))"))
+
+(deftest test-with-no-effect
+  (fires tests/findings "test-with-no-effect"
+         "(deftest t (is (= 1)))"
+         "(deftest t (is (= 1 1)))"))
+
+;; --------------------------------------------------------------- interop
+
+(deftest jndi-injection
+  (testing "fires on the static form; the instance form needs the receiver's type, which the node rules do not have — the rule covers a shape, not the weakness"
+    (fires interop/findings "jndi-injection"
+           "(defn look [n] (javax.naming.InitialContext/doLookup n))"
+           "(defn look [] (javax.naming.InitialContext/doLookup \"java:comp/env\"))")
+    (is (empty? (rules interop/findings "(defn look [n] (.lookup ctx n))")))))
+
+;; xml-external-entity's pair — parser built, hardening set or not — is in
+;; interop_test; banned-term's is in dictionary_test; the credential,
+;; permissions, shell, side-effect-in-swap and discarded-future pairs are in
+;; security_test. One gate, several files.
+
+;; ------------------------------------------------------------ invariants
+
+(deftest none-of-them-throw-on-unparseable-or-empty-input
+  (doseq [f [access/findings web/findings regex/findings tests/findings interop/all-findings]
+          src ["" "(" ")" "#_" ";; just a comment" "(defn"]]
+    (is (nil? (try (doall (f (:nodes (parse/parse src)))) nil
+                   (catch Throwable t t)))
+        (str "threw on " (pr-str src)))))

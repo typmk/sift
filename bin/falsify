@@ -25,8 +25,9 @@
       opt (fn [k] (some->> args (drop-while #(not= k %)) second))
       odir (opt "--oracle")
       analysis (or (opt "--analysis") (when odir (let [f (str odir "/analysis.json")] (when (fs/exists? f) f))))
-      vt-file (or (opt "--tags") (when odir (str odir "/tags.edn")))
-      loaded-file (or (opt "--loaded") (when odir (str odir "/loaded.edn")))
+      vt-file (or (opt "--tags") (when odir (let [f (str odir "/tags.edn")] (when (fs/exists? f) f))))
+      loaded-file (or (opt "--loaded") (when odir (let [f (str odir "/loaded.edn")] (when (fs/exists? f) f))))
+      externs (when odir (let [f (str odir "/externs.edn")] (when (fs/exists? f) (edn/read-string (slurp f)))))
       args (->> args (remove #(contains? (set (remove nil? [odir (opt "--analysis") (opt "--tags") (opt "--loaded") "--oracle" "--analysis" "--tags" "--loaded"])) %)) vec)
       [oracle-file kind root needle & files] args
       _ (when-not (and oracle-file kind root needle) (binding [*out* *err*] (println "usage: falsify notes.edn (boxed-math|reflection) <src-root> <path-needle> [files…]")) (System/exit 2))
@@ -57,7 +58,7 @@
                         :when (or (nil? loaded) (some #(suffix? (:file n) %) loaded))]
                     [(canon (:file n)) (:line n) (:col n)]))
       host (if (seq closure-notes) :js :jvm)
-      all-files (if (seq files) files (map str (fs/glob root "**.{clj,cljc,cljs}")))
+      all-files (if (seq files) files (map #(str (fs/absolutize %)) (fs/glob root "**.{clj,cljc,cljs}")))
       all-files (if loaded (filter (fn [f] (some #(suffix? (str f) %) loaded)) all-files) all-files)
       _ (when loaded (println "judging" (count all-files) "files the compiler loaded"))
       resolution (when analysis (resolve/index (slurp analysis)))
@@ -66,7 +67,7 @@
       classes dump
       _ (when (or analysis vt-file) (println "var-tags" (count var-tags) "classes" (count classes) "resolution files" (count resolution)))
       preds (set (for [f all-files
-                       p (tf/predictions (slurp f) f host {:var-tags var-tags :classes classes :resolution resolution})
+                       p (tf/predictions (slurp f) f host {:var-tags var-tags :classes classes :externs externs :resolution resolution})
                        :when (= kind (:kind p))]
                    [(canon f) (:line p) (:column p)]))
       tp (count (set/intersection oracle preds))

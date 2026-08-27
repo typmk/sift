@@ -1,0 +1,78 @@
+#!/usr/bin/env bb
+;; The property names Closure's default externs declare, as a set — the
+;; half of shadow-cljs's :infer-externs :auto question that a table answers.
+;; shadow warns for a member access on an untyped target only when the
+;; property is not already known; the externs are one source of "known",
+;; and the JS the build compiled (npm sources) is the other, which this does
+;; not dump yet: `radius`, `strength`, `interpolator` on the viewer corpus
+;; are deck.gl's and d3's own names, and typeflow still reports them.
+;;
+;;   bin/externs [--project DIR --sources SRC] [closure-compiler.jar] > externs.edn
+;;
+;; Without a jar, the newest closure-compiler jar in ~/.m2. That alone is
+;; the model: measured on the viewer at 92270f9^, P 0.84 R 1.00 (42 of 50).
+;;
+;; --project DIR --sources SRC ALSO adds every property name in the JS the
+;; sources require (transitively, through node_modules package.json), on the
+;; theory that shadow-cljs knows the names of the npm code it compiled. The
+;; theory is WRONG and the option stays as its record: it reclaimed the 8
+;; false positives (radius, strength, x0, y0, leaves, metrics,
+;; isSimulationRunning — all deck.gl's and d3's) and lost 14 true ones
+;; (zoomIn, setProps, bendPoints, sourcePosition — also all in npm sources,
+;; and shadow warned on them). What shadow knows that separates the two
+;; sets is not in Closure's externs and not "every npm property name";
+;; until it is read from shadow's own source, the JS host is P 0.84.
+(require '[babashka.fs :as fs] '[clojure.string :as str] '[clojure.java.io :as io] '[cheshire.core])
+(let [args (vec *command-line-args*)
+      project (some->> args (drop-while #(not= "--project" %)) second)
+      sources (some->> args (drop-while #(not= "--sources" %)) second)
+      args (vec (remove (set (remove nil? ["--project" project "--sources" sources])) args))
+      ;; dependencies AND devDependencies (shadow-cljs itself sits in dev), and
+      ;; their transitive dependencies through each package's own package.json:
+      ;; `d3` is a meta-package and every name lives in the d3-* siblings
+      npm-names (when project
+                  (let [deps-of (fn [dir] (let [pkg (str dir "/package.json")]
+                                            (when (fs/exists? pkg)
+                                              (let [m (cheshire.core/parse-string (slurp pkg))]
+                                                (concat (keys (get m "dependencies" {})) (keys (get m "devDependencies" {})))))))
+                        ;; rooted at what the SOURCES require — ["d3" :as d3],
+                        ;; "@deck.gl/core" — because that is the JS shadow compiled
+                        ;; for this build; package.json names tree-sitter and shadow
+                        ;; itself, whose property names the build never saw, and a
+                        ;; scan of those covered `sameNs`, which the oracle warns on
+                        root-deps (if sources
+                                    (distinct (for [f (fs/glob sources "**.{cljs,cljc}")
+                                                    [_ lib] (re-seq #"\[\"((?:@[A-Za-z0-9_.-]+/)?[A-Za-z0-9_.-]+)(?:/[^\"]*)?\"" (slurp (str f)))]
+                                                lib))
+                                    (deps-of project))
+                        closure (loop [seen #{} q (vec root-deps)]
+                                  (if-let [d (first q)]
+                                    (if (seen d) (recur seen (subvec q 1))
+                                        (recur (conj seen d) (into (subvec q 1) (let [m (cheshire.core/parse-string (or (some-> (str project "/node_modules/" d "/package.json") (#(when (fs/exists? %) (slurp %)))) "{}"))]
+                                                                                    (keys (get m "dependencies" {}))))))
+                                    seen))]
+                    (binding [*out* *err*] (println (count root-deps) "direct deps," (count closure) "with transitive"))
+                    (into (sorted-set)
+                          (for [d closure
+                                :let [dir (str project "/node_modules/" d)] :when (fs/exists? dir)
+                                f (fs/glob dir "**.{js,mjs,cjs}")
+                                :when (< (fs/size f) 4000000)
+                                [_ p] (re-seq #"\.([A-Za-z_$][A-Za-z0-9_$]*)" (slurp (str f)))]
+                            p))))
+      jar (or (first args)
+              (->> (fs/glob (str (System/getProperty "user.home") "/.m2/repository/com/google/javascript/closure-compiler") "**/closure-compiler-v*.jar")
+                   (map str) (remove #(str/includes? % "sources")) sort last))
+      _ (when-not jar (binding [*out* *err*] (println "no closure-compiler jar found")) (System/exit 2))
+      tmp (fs/create-temp-dir)
+      zip (java.util.zip.ZipFile. (str jar))
+      entry (.getEntry zip "externs.zip")
+      inner (str tmp "/externs.zip")]
+  (with-open [in (.getInputStream zip entry) out (io/output-stream inner)] (io/copy in out))
+  (let [z (java.util.zip.ZipFile. inner)
+        names (into (sorted-set)
+                    (for [e (enumeration-seq (.entries z)) :when (str/ends-with? (.getName e) ".js")
+                          [_ p] (re-seq #"\.([A-Za-z_$][A-Za-z0-9_$]*)" (slurp (.getInputStream z e)))]
+                      p))]
+    (binding [*out* *err*] (println (count names) "property names from" (fs/file-name jar)
+                                    (when project (str "+ " (count npm-names) " from " project "/node_modules"))))
+    (prn (into names npm-names))))

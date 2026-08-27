@@ -173,7 +173,7 @@ false positive on real code first, and every one is a test.
 | clojure-mcp (74 files, 517 notes) | boxed 79/79 · reflection **P 0.92 R 0.75** | boxed **79 / 79**, reflection **211 / 211** |
 | darling-toolkit (29 files, 71 notes) | boxed 38/39 · reflection **P 0.85 R 0.85** | boxed **39 / 39**, reflection **20 / 20** |
 | kora.core (22 files, 3,080 notes) | boxed **P 0.82 R 0.99** · reflection **P 0.71 R 0.88** | boxed **3,055 / 3,055**, reflection **25 / 25** |
-| defnet (JS, Closure) | — | 648 predicted, 0 warned: the JS model is wrong and predicts nothing |
+| defnet viewer at `92270f9^` (JS, 42 Closure warnings) | P 0.16 R 1.00 | **P 0.84 R 1.00** (42 / 50) — Closure's externs, `bin/externs` |
 
 **The forecasts are the "first score" column** — each taken before a line
 of that corpus was read. Everything in "now" is a fit. What the three
@@ -194,6 +194,38 @@ the instrument was wrong before the model was: five of lume's misses were
 files the compiler never compiled, and kora's first oracle had lost 2,300
 notes to assay's 256 KB sink and read as P 0.25. `corpora/*.edn` carries
 each corpus's role and first score, and a role only ever moves one way.
+
+**The JS host, judged for the first time.** The 648-vs-0 that switched
+it off was an EMPTY oracle — defnet's source was already clean — judging
+a model. The viewer at `92270f9^`, the last commit before its 42
+`:infer-warning`s were fixed, is the oracle now (`corpora/defnet-viewer-old.edn`,
+a worktree). `cljs.analyzer/analyze-dot` warns when the target's inferred
+tag is `nil` or `any`; shadow-cljs's `:infer-externs :auto` then keeps only
+the properties Closure's default externs do not declare — `beginPath` on an
+untyped `ctx` is silent, `sameNs` is not. `bin/externs` dumps that set
+(6,634 names) from the Closure jar; string-required aliases (`["d3" :as
+d3]`, `:refer [Graph]`) are `js`. P 0.16 → 0.68 → **0.84, R 1.00**. The 8
+false positives left (`radius`, `strength`, `x0`, `y0`, `leaves`,
+`metrics`, `isSimulationRunning`) are names shadow knows and this does
+not: adding every property name from the npm sources the build requires
+reclaimed those 8 and LOST 14 true ones (`zoomIn`, `setProps`,
+`sourcePosition` — all in npm sources too), so that theory is wrong and
+`bin/externs --sources` stays only as its record. What separates the two
+sets is in shadow's own source, which is AOT-only in the local jar and
+was not read.
+
+**Two traversal kits, and the decision to keep both.** The node families
+(security, interop, concurrency, regex, web, access, tests — 960 lines)
+walk `parse.cljc`'s flat node stream through eight `tree.cljc` helpers
+(130 lines); shape, data and typeflow walk the rewrite-clj zipper through
+`zip.cljc`. Porting the seven onto the zipper would delete 130 lines and
+rewrite 960 against a gate of forty flag/clear pairs and 68 real-code hits
+— and sonar-clojure's sensor needs the node stream anyway for line data
+and CPD. Not this round, and the reason is the ratio. What the split does
+cost is capability, not lines: a node rule cannot ask typeflow's
+environment what a receiver is, which is why `jndi-injection` covers the
+static form only. Letting node rules query the tag environment is the
+consolidation worth making, when a rule needs it.
 
 **Text alone is not the claim any more.** Without `bin/oracle`'s table the
 walker still runs — hints, literals, casts, `hosts.edn`'s short core and

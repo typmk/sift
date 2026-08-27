@@ -1,0 +1,15 @@
+;; a corpus bin/validate judges typeflow on. :role is the honest label —
+;; :in-sample was learned from, :held-out was judged after the rules were
+;; written, :blind was never read before its first score was recorded.
+;; JS: the oracle is a shadow-cljs release log (closure.log) plus Closure's
+;; extern property names (externs.edn, bin/externs). The sources are a git
+;; worktree of defnet at 92270f9^, the last commit whose viewer still had
+;; its 42 :infer-warnings.
+{:name "defnet-viewer-old"
+ :root "/tmp/claude-1000/-home-apollon-GitHub-defnet/6517e37c-f03f-485c-b184-2910d12c16f4/scratchpad/old/src/defnet/viewer"
+ :oracle "~/.cache/sift/oracles/defnet-viewer-old"
+ ;; first scores (2026-08-27): the pre-existing model, 262 predicted for 42
+ ;; (P 0.16 R 1.00); with Closure's externs, 62 (P 0.68); with string-require
+ ;; aliases as js, 50 (P 0.84 R 1.00) — where it stands. Adding npm property
+ ;; names reclaimed the 8 and lost 14: recorded in bin/externs, not used.
+ :role :held-out}

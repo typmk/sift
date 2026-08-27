@@ -59,9 +59,10 @@
     (is (= [] (kinds "(defn f [^String s] (java.util.UUID/fromString s))"))
         "a static with one overload resolves by name and arity")))
 
-(deftest the-js-host-predicts-nothing-yet
-  (is (= [] (tf/predictions "(defn f [x] (.foo x))" "x.cljs" :js))
-      "648 predictions against 0 Closure warnings on defnet — see hosts.edn"))
+(deftest the-js-host-predicts-without-an-externs-set-too
+  ;; the 648-vs-0 that once switched this host off was an empty oracle judging
+  ;; a model; with no externs set every non-js member access is reported
+  (is (= [:uninferred] (mapv :kind (remove #(= :reflection-unwarned (:kind %)) (tf/predictions "(defn f [x] (.foo x))" "x.cljs" :js))))))
 
 (defn- with [src opts] (kinds* src opts))
 
@@ -237,4 +238,14 @@
 (deftest an-exact-overload-wins-over-a-widening-one
   (is (= [] (at* "(defn f [^double d] (- 1 (Math/abs d)))" {:classes {:classes {"java.lang.Math" {:supers ["Object"] :methods {"abs" [{:params ["float"] :returns "float" :static? true} {:params ["double"] :returns "double" :static? true}]}}} :by-simple {"Math" ["java.lang.Math"]}}}))
       "a double fits abs(float) too; the compiler takes abs(double) exactly, and the answer is a primitive double"))
+
+(deftest the-js-host-warns-on-an-untyped-target-with-a-non-extern-property
+  ;; cljs.analyzer/analyze-dot + shadow-cljs :infer-externs :auto; viewer at 92270f9^, 42/50
+  (let [js (fn [src] (mapv :kind (remove #(= :reflection-unwarned (:kind %)) (tf/predictions src "x.cljs" :js {:externs #{"beginPath" "length"}}))))]
+    (is (= [:uninferred] (js "(defn f [d] (.-sameNs d))")))
+    (is (= [] (js "(defn f [ctx] (.beginPath ctx))")) "an extern property is silent whatever the target")
+    (is (= [] (js "(defn f [^js d] (.-sameNs d))")))
+    (is (= [] (js "(defn f [] (.-sameNs js/window))")))
+    (is (= [] (js "(ns v (:require [\"d3\" :as d3]))\n(defn f [] (.-interpolateBlues d3))")) "a string-required alias is js")
+    (is (= [] (js "(ns v (:require [\"d3\" :as d3]))\n(defn f [] (.interpolator (d3/scaleSequential)))")) "a call through the alias is a js value")))
 

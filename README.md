@@ -12,6 +12,25 @@ running it on both, not by compiling it.
       {:findings (sift/findings nodes)
        :measures (sift/measures nodes)})
 
+**One call, one shape.** A consumer that wants everything sift can say
+about a file calls `analyze` and filters on `:family`:
+
+    (sift/analyze {:text source :path "src/a.clj"
+                   :resolution (sift/resolution kondo-json)      ; optional
+                   :prose      (sift/prose-findings kondo-json)}) ; optional
+    ;; => {:ok? true
+    ;;     :findings [{:rule :place-as-fold :family :shape :category :refactor
+    ;;                 :applicability :machine-applicable :instruction "…"
+    ;;                 :line 5 :message "…" :counterpart (reduce …)} …]
+    ;;     :units    [{:name "f" :cognitive 3 :cyclomatic 3 :children […]} …]
+    ;;     :seeds    {…}}
+
+Every finding, whichever family produced it — `:node` (the stream rules),
+`:shape`, `:complexity`, `:prose` — carries a keyword `:rule`, a
+`:category`, an `:applicability` and an `:instruction`. defnet's
+`ingest op=scan` is one fold over this; `bin/sift lint` prints it. The
+per-family functions below still exist for sonar-clojure.
+
 Two more kinds of rule run over source TEXT rather than the node stream,
 because they need the tree:
 
@@ -121,7 +140,8 @@ one zipper vocabulary every rule reads the tree with.
 
 ## The CLI
 
-    bin/sift shape <path>…                    # findings, exit 1 if any
+    bin/sift lint [--family F] <path>…        # everything, one shape; exit 1 if any
+    bin/sift shape <path>…                    # the shape family only
     bin/sift complexity [--threshold N] <path>…
     bin/sift shape --edn src                  # as data
     bin/sift shape --analysis kondo.json src  # resolve through clj-kondo
@@ -129,6 +149,7 @@ one zipper vocabulary every rule reads the tree with.
     bin/sift shape --baseline b.edn src       # … and report only new ones
     bin/sift docs-mirror analysis.json out/   # docstrings as <path>.md, for Vale
     bin/sift vale-sarif vale.json > vale.sarif # then: defnet ingest op=sarif
+    bin/sift vale-style vale/styles/Sift      # regenerate the styles from prose.cljc
 
 A babashka script over the same namespaces, for a lint task or a prompt. defnet's
 `ingest op=scan` is the same rules attached to graph definitions.

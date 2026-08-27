@@ -40,13 +40,18 @@
    :doc/ns-missing     {:category :design
                         :instruction "A namespace docstring says what lives here and why it is separate; one sentence is enough."}})
 
-(def ^:private hedges
+(def hedges
+  "Also the source of vale/styles/Sift/Hedge.yml — `bin/sift vale-style`."
   ["this function" "this fn" "this method" "is used to" "is responsible for"
    "simply" "basically" "essentially" "in order to" "the purpose of" "helper function"
    "utility function" "as the name suggests"])
 
+(def placeholder-tokens
+  "Also the source of vale/styles/Sift/Placeholder.yml — `bin/sift vale-style`."
+  ["TODO" "FIXME" "XXX" "write this" "fill in" "WIP"])
+
 (def ^:private placeholders
-  [#"(?i)\bTODO\b" #"(?i)\bFIXME\b" #"(?i)\bXXX\b" #"(?i)write this" #"(?i)fill in" #"(?i)\bWIP\b"])
+  (mapv #(re-pattern (str "(?i)(^|[^a-z])" % "([^a-z]|$)")) placeholder-tokens))
 
 (def ^:private stop-words
   #{"a" "an" "the" "of" "to" "and" "or" "for" "in" "on" "with" "from" "by" "is"

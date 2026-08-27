@@ -22,7 +22,8 @@
   code it measures runs your side effects on the CI box. A REPL-side consumer
   that has already loaded the code is a different context and may rank higher;
   this surface is for the one that has not."
-  (:require [com.typemark.sift.access :as access]
+  (:require [clojure.string :as str]
+            [com.typemark.sift.access :as access]
             [com.typemark.sift.analysis :as analysis]
             [com.typemark.sift.callgraph :as callgraph]
             [com.typemark.sift.complexity :as complexity]
@@ -96,12 +97,17 @@
 ;; ── rules ──────────────────────────────────────────────────────────────────
 
 (def node-rules
-  "Rules over the node stream. Order fixed so output is stable across runs.
-  `:tests` is separate rather than listed here because it applies only to test
-  sources, and a rule that silently returns nothing on main sources would be
+  "Rules over the node stream, each with the Credo category its findings
+  carry. Order fixed so output is stable across runs. `:tests` is separate
+  rather than listed here because it applies only to test sources, and a
+  rule that silently returns nothing on main sources would be
   indistinguishable from one that is broken."
-  [security/findings interop/all-findings concurrency/findings
-   regex/findings web/findings access/findings])
+  [[:warning security/findings]
+   [:warning interop/all-findings]
+   [:warning concurrency/findings]
+   [:warning regex/findings]
+   [:warning web/findings]
+   [:design  access/findings]])
 
 (defn seeds
   "Taint sources and sinks this file contributes to the interprocedural pass."
@@ -111,8 +117,72 @@
 (defn findings
   "Every node-stream finding for one file. `:test?` adds the test-only rules."
   [nodes & {:keys [test?]}]
-  (concat (mapcat #(% nodes) node-rules)
+  (concat (mapcat (fn [[_ f]] (f nodes)) node-rules)
           (when test? (tests/findings nodes))))
+
+;; ── one entry point ────────────────────────────────────────────────────────
+
+(defn- normalize
+  "Every finding, whatever produced it, in one shape: a keyword :rule, a
+  :family naming the producer, a :category, an :applicability, an
+  :instruction. The node-stream rules predate the last three and carried
+  a string rule; nothing downstream should have to know which family a
+  finding came from to read it."
+  [family category f]
+  (-> f
+      (update :rule #(if (keyword? %) % (keyword %)))
+      (assoc :family family)
+      (update :category #(or % category))
+      (update :applicability #(or % :unspecified))
+      (update :instruction #(or % (:message f)))))
+
+(defn- prose-for
+  "The prose findings for `path` out of a `prose-findings` map, whose keys
+  are however clj-kondo was invoked — matched by the longest suffix."
+  [prose path]
+  (when (and prose path)
+    (some->> (keys prose)
+             (filter #(or (str/ends-with? path %) (str/ends-with? % path)))
+             (sort-by count >)
+             first
+             (get prose))))
+
+(defn analyze
+  "Everything sift can say about one file, in one call and one shape.
+
+    {:text       source
+     :path       the file, for #? branch, the .clj/.cljs host rules and
+                 prose lookup
+     :test?      run the test-only rules too
+     :resolution (sift/resolution kondo-json), optional
+     :prose      (sift/prose-findings kondo-json), optional — built once
+                 per analysis, this picks the entries for :path}
+
+  -> {:ok? true
+      :findings [f …]   every rule family, normalised — see `normalize`
+      :units    [u …]   per-unit complexity, nested units as :children
+      :seeds    {…}     this file's taint sources and sinks, for
+                        `interprocedural`}
+  or {:ok? false :error msg} when the source does not read. A consumer that
+  wants one family filters on :family — :node :shape :complexity :prose —
+  rather than calling four functions."
+  [{:keys [text path test? resolution prose]}]
+  (let [{:keys [ok? nodes error]} (p/parse text)]
+    (if-not ok?
+      {:ok? false :error (or error "unparseable")}
+      (let [node   (concat (for [[cat f] node-rules, x (f nodes)] (normalize :node cat x))
+                           (when test? (map #(normalize :node :design %) (tests/findings nodes))))
+            shape  (map #(normalize :shape :refactor %) (shape/findings text path resolution))
+            cx     (complexity/report text path)
+            over   (map #(normalize :complexity :refactor
+                                    (assoc % :category :refactor
+                                             :instruction "Split the unit: one branch per helper, or lift the nested lambda that carries the score."))
+                        (complexity/findings text path))
+            doc    (map #(normalize :prose :readability %) (prose-for prose path))]
+        {:ok? true
+         :findings (vec (concat node shape over doc))
+         :units (if (:ok? cx) (:functions cx) [])
+         :seeds (security/seeds nodes)}))))
 
 (defn prose-findings
   "Rules over docstrings, which need clj-kondo's analysis rather than the

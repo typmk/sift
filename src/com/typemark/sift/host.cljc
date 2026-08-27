@@ -151,9 +151,10 @@
        (or (str/starts-with? n ".")
            (= n "new")
            (str/ends-with? n ".")
-           (and (str/includes? n "/")
-                (let [ns-part (first (str/split n #"/"))]
-                  (and (seq ns-part) (Character/isUpperCase (first ns-part))))))))
+           ;; `Class/static`: a capitalised namespace part. A regex, not
+           ;; Character/isUpperCase — that is JVM-only and the reader this
+           ;; rule feeds (op=hostwarn) reported it undeclared under cljs.
+           (boolean (re-find #"^[A-Z][^/]*/" n)))))
 
 (defn- jvm-file? [file]
   (and file (or (str/ends-with? file ".clj") (str/ends-with? file ".cljc"))))

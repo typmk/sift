@@ -131,6 +131,37 @@ attributed, 84 labels (`:vale/Sift.Hedge` + level), zero defnet code
 changed. Vale's `[formats]` mapping refused `.cljs`, which is why the mirror
 carries the suffix.
 
+**Type flow — where a tag dies, predicted, and judged by the host compiler
+(`typeflow.cljc`).** Clojure on a host is an overlay: every value is Object,
+every fn is `IFn.invoke(Object…)`, and the only static types are hints,
+literals, casts and host signatures. The compiler carries a tag locally and
+takes the slow path where it runs out — reflection and boxed math on the JVM
+— and says so. `typeflow` predicts those sites from the source alone: params
+(hinted or Object), literals, `let`/`loop`/`with-open`/`if-let` bindings,
+casts, core fns the host knows, `:arith` (primitive iff every operand is),
+`doto`/`->` threaded receivers, `catch` classes, statics and constructors as
+known classes, and a short table of overloaded members. Dialyzer's stance:
+never *this is well-typed*, only *the compiler will not know this tag here*.
+`hosts.edn` makes a dialect a row (JVM, JS, …); `concepts.edn` (vendored
+from clojure-runtime-book) is the lattice above the host.
+
+**Judged before believed — `bin/falsify`, against assay's notes:**
+
+| corpus | boxed-math | reflection |
+|---|---|---|
+| sift itself (JVM) | 44 / 45 — P 0.98 R 0.98 | oracle empty (fully hinted) |
+| agentia (JVM) | — | 1 / 1 |
+| lume (JVM, 334 notes) | P 0.87 R 0.98 | P 0.58 R 0.96 |
+| defnet (JS, Closure) | n/a | **648 predicted, 0 warned — the model was wrong, and JS predicts nothing** |
+
+What the misses are: a bare `inc` inside `cond->` (threading expansion), a
+library fn with a `^String` return hint the compiler reads and a text rule
+cannot (`json/write-str`) — the ceiling without a resolver. Every rule in the
+table above was learned from a false positive or a miss on real code, each
+named in `hosts.edn`. defnet's `ingest op=scan` lands these as
+`:sift/boxed-math` / `:sift/reflection` on definitions; `op=hostwarn` lands
+the compiler's own answer beside them.
+
 **Every finding carries** `:rule`, `:category` (Credo's `:refactor`
 `:readability` `:design` `:warning` `:consistency`), `:instruction`, and an
 `:applicability` on clippy's four rungs — `:machine-applicable`,
@@ -177,7 +208,7 @@ nothing should.
 
     clojure -M:test
 
-99 tests, 328 assertions. `sonar-clojure` runs the same files a second time
+102 tests, 348 assertions. `sonar-clojure` runs the same files a second time
 through its own `:test` alias (`-d ../sift/test`): this harness proves the
 library stands alone, that one proves it still fits the consumer.
 

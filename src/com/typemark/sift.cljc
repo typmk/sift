@@ -39,6 +39,7 @@
             [com.typemark.sift.security :as security]
             [com.typemark.sift.shape :as shape]
             [com.typemark.sift.tests :as tests]
+            [com.typemark.sift.typeflow :as typeflow]
             [com.typemark.sift.web :as web]))
 
 ;; ── structure ──────────────────────────────────────────────────────────────
@@ -159,7 +160,8 @@
                  per analysis, this picks the entries for :path}
 
   -> {:ok? true
-      :findings [f …]   every rule family, normalised — see `normalize`
+      :findings [f …]   every rule family, normalised — see `normalize`:
+                        :node :shape :complexity :prose :typeflow
       :units    [u …]   per-unit complexity, nested units as :children
       :seeds    {…}     this file's taint sources and sinks, for
                         `interprocedural`}
@@ -178,9 +180,12 @@
                                     (assoc % :category :refactor
                                              :instruction "Split the unit: one branch per helper, or lift the nested lambda that carries the score."))
                         (complexity/findings text path))
-            doc    (map #(normalize :prose :readability %) (prose-for prose path))]
+            doc    (map #(normalize :prose :readability %) (prose-for prose path))
+            flow   (map #(normalize :typeflow :warning
+                                    (assoc % :instruction "Hint the receiver or operands (^String s, ^long n), or cast (long x); the host compiler takes the slow path where the tag runs out."))
+                        (typeflow/findings text path))]
         {:ok? true
-         :findings (vec (concat node shape over doc))
+         :findings (vec (concat node shape over doc flow))
          :units (if (:ok? cx) (:functions cx) [])
          :seeds (security/seeds nodes)}))))
 

@@ -1,0 +1,37 @@
+#!/usr/bin/env bb
+;; typeflow's judge: predictions against assay's notes (the JVM compiler's
+;; own reflection and boxed-math warnings), as precision and recall.
+;;
+;;   1. (require 'assay.code) (assay.code/watch!) (require 'your.ns …)
+;;      (spit "notes.edn" (with-out-str (run! prn (assay.code/watched))))
+;;   2. bin/falsify notes.edn boxed-math <src-root> <path-needle> [files…]
+;;      bin/falsify notes.edn reflection <src-root> <path-needle>
+;;
+;; <path-needle> keeps only oracle notes whose file contains it (assay
+;; names a file as the classpath resource; a dependency's notes are in
+;; the same stream). Files are keyed by their last two path segments on
+;; both sides. Numbers this printed are the ones in the README.
+(require '[babashka.classpath :as cp] '[babashka.fs :as fs])
+(cp/add-classpath (str (fs/parent (fs/parent (fs/real-path *file*))) "/src"))
+(require '[com.typemark.sift.typeflow :as tf] '[clojure.edn :as edn] '[clojure.set :as set] '[clojure.string :as str])
+(defn tail2 [p] (str/join "/" (take-last 2 (str/split (str p) #"/"))))
+(let [[oracle-file kind root needle & files] *command-line-args*
+      _ (when-not (and oracle-file kind root needle) (binding [*out* *err*] (println "usage: falsify notes.edn (boxed-math|reflection) <src-root> <path-needle> [files…]")) (System/exit 2))
+      kind (keyword kind)
+      notes (->> (str/split-lines (slurp oracle-file)) (remove str/blank?) (map edn/read-string))
+      code->kind {:assay.note/boxed-math :boxed-math :assay.note/reflection :reflection}
+      oracle (set (for [n notes :let [sp (:assay.note/span n)]
+                        :when (= kind (code->kind (:assay.note/code n)))
+                        :when (str/includes? (str (:assay/file sp)) needle)]
+                    [(tail2 (:assay/file sp)) (:assay/line sp) (:assay/col sp)]))
+      preds (set (for [f (if (seq files) files (map str (fs/glob root "**.{clj,cljc}")))
+                       p (tf/predictions (slurp f) f :jvm)
+                       :when (= kind (:kind p))]
+                   [(tail2 f) (:line p) (:column p)]))
+      tp (count (set/intersection oracle preds))
+      p (if (pos? (count preds)) (/ tp (double (count preds))) 0.0)
+      r (if (pos? (count oracle)) (/ tp (double (count oracle))) 0.0)]
+  (println kind "oracle" (count oracle) "predicted" (count preds) "tp" tp "fp" (- (count preds) tp) "fn" (- (count oracle) tp))
+  (println (format "precision %.3f recall %.3f" p r))
+  (println "-- false negatives (oracle, not predicted):") (run! #(println "  " %) (take 10 (sort (set/difference oracle preds))))
+  (println "-- false positives (predicted, not oracle):") (run! #(println "  " %) (take 10 (sort (set/difference preds oracle)))))

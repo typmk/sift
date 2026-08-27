@@ -7,6 +7,15 @@
                     [clojure.java.io :as io])))
 
 #?(:clj
+   (defmacro load-edn
+     "Any EDN resource under com/typemark/sift, inlined at compile time — hosts.edn
+     and concepts.edn ride the same mechanism as rules.edn."
+     [resource-name]
+     (let [r (or (io/resource (str "com/typemark/sift/" resource-name))
+                 (throw (ex-info (str resource-name " is not on the classpath") {})))]
+       `(quote ~(edn/read-string (slurp r))))))
+
+#?(:clj
    (defmacro load-rules
      "rules.edn as a literal vector of rule maps."
      []

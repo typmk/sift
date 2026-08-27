@@ -1,0 +1,7 @@
+;; a corpus bin/validate judges typeflow on. :role is the honest label —
+;; :in-sample was learned from, :held-out was judged after the rules were
+;; written, :blind was never read before its first score was recorded.
+{:name "lume"
+ :root "~/GitHub/hbtcomputers.com.au/lume/src"
+ :oracle "~/.cache/sift/oracles/lume"
+ :role :in-sample}

@@ -19,29 +19,47 @@
 ;;   :warns        which predictions this host's compiler actually emits, so a
 ;;                 prediction with no oracle is not reported as a fact.
 {:jvm {:primitives #{"long" "double" "int" "float" "boolean" "char" "byte" "short"}
+       ;; true/false are a BooleanExpr whose class is java.lang.Boolean — boxed,
+       ;; so (.setFlag x true) matches setFlag(Boolean) and not setFlag(boolean)
+       ;; only when both exist; numbers are primitive long/double
        :literal {:int "long" :float "double" :string "String" :char "char"
-                 :bool "boolean" :keyword "Keyword" :symbol "Symbol" :regex "Pattern"
-                 :vector :vector :map :map :set :set :list :list :nil "nil"}
+                 :bool "Boolean" :keyword "Keyword" :symbol "Symbol" :regex "Pattern"
+                 :vector :vector :map :map :set :set :list :list :nil "nil"
+                 ;; all-constant collections fold to the concrete class
+                 :vector-const :vector-const :map-const :map-const :set-const :set-const}
+       ;; what a concept or a walker tag is, as a class the dump has supers
+       ;; for — IPersistentVector is not a java.util.List, PersistentVector is
+       :concept-classes {:vector "IPersistentVector" :vector-const "PersistentVector"
+                         :map "IPersistentMap" :map-const "PersistentArrayMap"
+                         :set "IPersistentSet" :set-const "PersistentHashSet"
+                         :list "PersistentList" :seq "ISeq"
+                         "Number" "Number" "Fn" "AFunction" "js-literal" "Object"}
        :casts {"long" "long" "int" "int" "double" "double" "float" "float"
                "short" "short" "byte" "byte" "char" "char" "boolean" "boolean"}
+       ;; What the JVM compiler knows a core call returns: :inline forms (count,
+       ;; not, the predicates, the math) and vars carrying ^Tag (str, name,
+       ;; subs, keyword, symbol, clojure.java.io). NOT vec, vector, list, assoc,
+       ;; hash-map, first, nth, get, partial, comp: those are plain invokes and
+       ;; return Object — (.messages b (list …)) reflected on clojure-mcp while
+       ;; this table said :list. bin/oracle's :vars is the same fact, live.
        :core {"str" "String" "name" "String" "namespace" "String" "subs" "String"
               "count" "int" "alength" "int" "keyword" "Keyword" "symbol" "Symbol"
-              "vec" :vector "vector" :vector "hash-map" :map "assoc" :map "dissoc" :map
-              "fn" "Fn" "fn*" "Fn" "partial" "Fn" "comp" "Fn" "constantly" "Fn"
-              "set" :set "list" :list "seq" :seq "first" "Object" "rest" :seq
+              "char-array" "char[]" "byte-array" "byte[]" "int-array" "int[]" "long-array" "long[]"
+              "double-array" "double[]" "boolean-array" "boolean[]" "object-array" "Object[]"
+              "fn" "AFunction" "fn*" "AFunction"
               ;; clojure.java.io carries return hints the compiler reads; keyed
               ;; by name because `head*` is the unqualified name (io/file -> file)
               "file" "java.io.File" "reader" "java.io.Reader" "writer" "java.io.Writer"
               "input-stream" "java.io.InputStream" "output-stream" "java.io.OutputStream"
               "as-file" "java.io.File" "as-url" "java.net.URL"
-              "nth" "Object" "get" "Object" "atom" "Atom" "deref" "Object"
+              "atom" "Atom" "class" "Class"
               "boolean" "boolean" "not" "boolean" "nil?" "boolean" "some?" "boolean"
               "empty?" "boolean" "seq?" "boolean" "map?" "boolean" "vector?" "boolean"
               "string?" "boolean" "number?" "boolean" "keyword?" "boolean"
               "+" :arith "-" :arith "*" :arith "/" :arith "inc" :arith "dec" :arith
               ;; mod is a plain defn with no :inline — it never reaches Numbers
               ;; and never warns (lume abn.clj:15, measured); quot and rem do
-              "quot" :arith "rem" :arith "mod" "Number" "max" :arith "min" :arith "abs" :arith
+              "quot" :arith "rem" :arith "mod" nil "max" :arith "min" :arith "abs" :arith
               "<" "boolean" ">" "boolean" "<=" "boolean" ">=" "boolean" "==" "boolean"
               "zero?" "boolean" "pos?" "boolean" "neg?" "boolean" "even?" "boolean" "odd?" "boolean"
               ;; bit ops: Numbers.and(Object,Object) WARNS when an operand is
@@ -55,7 +73,10 @@
        ;; clojure.core/<= and the compiler says nothing about it — measured
        ;; on lume, email.clj:167, a "false positive" that was a wrong model.
        ;; Absent means any arity.
-       :inline-arities {"mod" #{} "<" #{2} ">" #{2} "<=" #{2} ">=" #{2} "==" #{2} "max" #{2} "min" #{2}
+       ;; max and min are nary-inline like + — (max r g b) warns three times on
+       ;; kora.core, and this table said only two arguments did
+       :inline-arities {"mod" #{} "<" #{2} ">" #{2} "<=" #{2} ">=" #{2} "==" #{2}
+                        "max" :two-or-more "min" :two-or-more
                         "+" :two-or-more "*" :two-or-more "/" :two-or-more "-" :one-or-more}
        ;; host members whose result the compiler knows to be primitive, so
        ;; math over them is unboxed: (quot (System/currentTimeMillis) 1000)
@@ -91,6 +112,8 @@
        ;; test position narrows its argument in the then-branch. Classes, not
        ;; primitives — (number? x) does not unbox x, so boxed-math is unmoved;
        ;; reflection on (.length s) after (string? s) is not.
+       ;; RETRACTED 2026-08-27: the compiler never narrows a local on a predicate
+       ;; (kora.core tokens.cljc, measured). Kept as the record; typeflow ignores it.
        :narrows {"string?" "String" "keyword?" "Keyword" "symbol?" "Symbol"
                  "map?" :map "vector?" :vector "set?" :set "seq?" :seq "coll?" :collection
                  "fn?" "Fn" "ifn?" "IFn" "char?" "Character" "boolean?" "Boolean"
@@ -102,7 +125,9 @@
                "bit-and" "bit-or" "bit-xor" "bit-not" "bit-shift-left" "bit-shift-right" "unsigned-bit-shift-right"
                "unchecked-add" "unchecked-subtract" "unchecked-multiply" "unchecked-inc" "unchecked-dec"}
        ;; a static call may be fully qualified — java.security.MessageDigest/getInstance
-       :interop {:instance-call "^\\.[^-]" :field "^\\.-" :static "^([a-z][a-z0-9_]*\\.)*[A-Z][A-Za-z0-9_$.]*/" :ctor "\\.$"}
+       ;; :ctor needs a name before the dot: `..` is not a constructor, and was
+       ;; tagged "." — a known class — until clojure-mcp's (.. pb (start))
+       :interop {:instance-call "^\\.[^-]" :field "^\\.-" :static "^([a-z][a-z0-9_]*\\.)*[A-Z][A-Za-z0-9_$.]*/" :ctor "[A-Za-z0-9_$]\\.$"}
        :known-receiver #{}
        :warns #{:boxed-math :reflection}}
 

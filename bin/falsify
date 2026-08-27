@@ -4,15 +4,13 @@
 ;; (Closure: :infer-warning as :uninferred) — as precision and recall. One
 ;; oracle interface: a note is {:file :line :col :kind}, whichever host wrote it.
 ;;
-;;   1. (require 'assay.code) (assay.code/watch!) (require 'your.ns …)
-;;      (spit "notes.edn" (with-out-str (run! prn (assay.code/watched))))
+;;   1. cd <project> && clojure -M sift/bin/oracle src     -> oracle/{notes,loaded,tags}.edn, analysis.json
 ;;   2. bin/falsify notes.edn boxed-math <src-root> <path-needle> [files…]
 ;;      bin/falsify notes.edn reflection <src-root> <path-needle>
-;;      … --analysis kondo.json --var-tags var-tags.edn   (return hints through
-;;      kondo's resolution: the corpus's own ^Tag defns plus bin/var-tags')
-;;      … --loaded loaded.edn   (bin/assay-notes' list of files the compiler
-;;      actually compiled; predictions elsewhere are not judged — a file with
-;;      no note is either clean or never loaded, and notes cannot tell)
+;;      … --oracle DIR   (everything bin/oracle wrote: loaded.edn so only
+;;      files the compiler compiled are judged; tags.edn for var return
+;;      hints and the class table; analysis.json for kondo's resolution)
+;;      or the pieces: --analysis F --tags F --loaded F
 ;;
 ;; <path-needle> keeps only oracle notes whose file contains it (assay
 ;; names a file as the classpath resource; a dependency's notes are in
@@ -25,8 +23,11 @@
 (defn tail2 [p] (str/join "/" (take-last 2 (str/split (str p) #"/"))))
 (let [args (vec *command-line-args*)
       opt (fn [k] (some->> args (drop-while #(not= k %)) second))
-      analysis (opt "--analysis") vt-file (opt "--var-tags") loaded-file (opt "--loaded")
-      args (->> args (remove #(contains? (set (remove nil? [analysis vt-file loaded-file "--analysis" "--var-tags" "--loaded"])) %)) vec)
+      odir (opt "--oracle")
+      analysis (or (opt "--analysis") (when odir (let [f (str odir "/analysis.json")] (when (fs/exists? f) f))))
+      vt-file (or (opt "--tags") (when odir (str odir "/tags.edn")))
+      loaded-file (or (opt "--loaded") (when odir (str odir "/loaded.edn")))
+      args (->> args (remove #(contains? (set (remove nil? [odir (opt "--analysis") (opt "--tags") (opt "--loaded") "--oracle" "--analysis" "--tags" "--loaded"])) %)) vec)
       [oracle-file kind root needle & files] args
       _ (when-not (and oracle-file kind root needle) (binding [*out* *err*] (println "usage: falsify notes.edn (boxed-math|reflection) <src-root> <path-needle> [files…]")) (System/exit 2))
       kind (keyword kind)
@@ -60,11 +61,12 @@
       all-files (if loaded (filter (fn [f] (some #(suffix? (str f) %) loaded)) all-files) all-files)
       _ (when loaded (println "judging" (count all-files) "files the compiler loaded"))
       resolution (when analysis (resolve/index (slurp analysis)))
-      var-tags (merge (when vt-file (edn/read-string (slurp vt-file)))
-                      (apply merge (map #(tf/var-tags (slurp %)) all-files)))
-      _ (when (or analysis vt-file) (println "var-tags" (count var-tags) "resolution files" (count resolution)))
+      dump (when vt-file (edn/read-string (slurp vt-file)))
+      var-tags (merge (:vars dump) (apply merge (map #(tf/var-tags (slurp %)) all-files)))
+      classes dump
+      _ (when (or analysis vt-file) (println "var-tags" (count var-tags) "classes" (count classes) "resolution files" (count resolution)))
       preds (set (for [f all-files
-                       p (tf/predictions (slurp f) f host {:var-tags var-tags :resolution resolution})
+                       p (tf/predictions (slurp f) f host {:var-tags var-tags :classes classes :resolution resolution})
                        :when (= kind (:kind p))]
                    [(canon f) (:line p) (:column p)]))
       tp (count (set/intersection oracle preds))

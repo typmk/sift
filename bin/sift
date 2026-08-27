@@ -45,8 +45,8 @@
           (fs/directory? p) (filterv clj-file? (fs/glob p "**.{clj,cljs,cljc}"))
           :else (throw (ex-info (str "not a file or directory: " path) {:path (str path)})))))
 
-(defn- print-finding [{:keys [file line column rule message instruction counterpart applicability]}]
-  (printf "%s:%s:%s %s %s\n" file line (or column 1) (name rule) message)
+(defn- print-finding [{:keys [file line column rule message instruction counterpart applicability evidence]}]
+  (printf "%s:%s:%s %s [%s] %s\n" file line (or column 1) (name rule) (name (or evidence :unjudged)) message)
   (when instruction (printf "  rewrite: %s\n" instruction))
   (when counterpart (printf "  counterpart (%s):\n    %s\n" (name applicability) (pr-str counterpart))))
 

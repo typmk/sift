@@ -65,6 +65,34 @@
 
 (defn- with [src opts] (kinds* src opts))
 
+(def classes
+  "A slice of what bin/oracle dumps, enough for the assertions below —
+  supers, constructors and methods with parameter types."
+  {"OutputStreamWriter" {:supers ["Writer" "Object"] :ctors [{:params ["OutputStream"]} {:params ["OutputStream" "String"]} {:params ["OutputStream" "Charset"]}]
+                         :methods {"write" [{:params ["String"] :returns "void"} {:params ["char[]"] :returns "void"} {:params ["int"] :returns "void"}
+                                            {:params ["String" "int" "int"] :returns "void"}]}}
+   "HttpURLConnection" {:supers ["URLConnection" "Object"] :ctors [] :methods {"getResponseCode" [{:params [] :returns "int"}]}}
+   "Character" {:supers ["Object"] :ctors [] :methods {"digit" [{:params ["char" "int"] :returns "int" :static? true} {:params ["int" "int"] :returns "int" :static? true}]}}
+   "URL" {:supers ["Object"] :ctors [{:params ["String"]} {:params ["URL" "String"]} {:params ["String" "String" "int" "String"]}] :methods {}}
+   "ProcessBuilder" {:supers ["Object"] :ctors [{:params ["List"]} {:params ["String[]"]}] :methods {"start" [{:params [] :returns "Process"}]}}
+   "Builder" {:supers ["Object"] :ctors [] :methods {"temperature" [{:params ["Double"] :returns "Builder"}]
+                                                      ;; declared only on a package-private base: Reflector.getAsMethodOfPublicBase finds nothing
+                                                      "maxRetries" [{:params ["Integer"] :returns "Builder" :public? false}]
+                                                      "modelName" [{:params ["String"] :returns "Builder"}]
+                                                      "anyOf" [{:params ["List"] :returns "Builder"} {:params ["JsonSchemaElement[]"] :returns "Builder"}]
+                                                      "build" [{:params [] :returns "Model"}]}}
+   "Model" {:supers ["Object"] :ctors [] :methods {"builder" [{:params [] :returns "Builder" :static? true}]}}
+   "ToolExecutor" {:supers ["Object"] :ctors [] :methods {"execute" [{:params ["ToolExecutionRequest" "Object"] :returns "String"}]}}
+   "ToolExecutionRequest" {:supers ["Object"] :ctors [] :methods {"name" [{:params [] :returns "String"}]}}
+   "PersistentVector" {:supers ["List" "IPersistentVector" "Object"]}
+   "IPersistentVector" {:supers ["Sequential" "Object"]}
+   "String" {:supers ["CharSequence" "Object"]}})
+(def dump
+  "The tags.edn shape: classes by full name, reached by simple name."
+  {:classes (into {} (map (fn [[k v]] [(str "x." k) v])) classes)
+   :by-simple (into {} (map (fn [[k _]] [k [(str "x." k)]])) classes)})
+(defn- judged [src] (kinds* src {:classes dump}))
+
 (deftest what-lume-taught-once-every-file-was-judged
   ;; bin/assay-notes writes loaded.edn; before it, five "false positives" were
   ;; in test files the compiler never compiled. These are the model errors
@@ -95,19 +123,16 @@
   (testing "a constructor is its class, so an overloaded method on it can be judged"
     (is (= [[:reflection 38]]
            (at* "(defn f [^java.io.OutputStream o ev] (.write (java.io.OutputStreamWriter. o \"UTF-8\") ev))"
-                {:var-tags {"OutputStreamWriter/.write" {:returns "void" :overloaded #{1 3}}}}))
+                {:classes dump}))
         "write(String) / write(char[]) / write(int) and ev is untyped — diplomat.clj:401")
-    (is (= [] (with "(defn f [^java.io.OutputStream o ^String ev] (.write (java.io.OutputStreamWriter. o \"UTF-8\") ev))"
-                    {:var-tags {"OutputStreamWriter/.write" {:returns "void" :overloaded #{1 3}}}}))))
+    (is (= [] (judged "(defn f [^java.io.OutputStream o ^String ev] (.write (java.io.OutputStreamWriter. o \"UTF-8\") ev))"))))
   (testing "a dumped method return on a known receiver is primitive; on an unknown receiver the call reflects and returns Object"
-    (is (= [] (with "(defn f [^java.net.HttpURLConnection c] (< (.getResponseCode c) 400))"
-                    {:var-tags {"HttpURLConnection/.getResponseCode" "int"}})))
+    (is (= [] (judged "(defn f [^java.net.HttpURLConnection c] (< (.getResponseCode c) 400))")))
     (is (= [:boxed-math :reflection] (kinds "(defn f [xs] (inc (.indexOf xs \"p\")))"))
         "agentia ledger.clj:296 — .indexOf is in :host-returns, and that only holds when it resolved")
     (is (= [] (kinds "(defn f [^String xs] (inc (.indexOf xs \"p\")))"))))
   (testing "a static call the dump knows returns its primitive"
-    (is (= [] (with "(defn f [c] (- (Character/digit ^char c 10) 1))"
-                    {:var-tags {"Character/.digit" {:returns "int" :overloaded #{2}}}})))))
+    (is (= [] (judged "(defn f [c] (- (Character/digit ^char c 10) 1))")))))
 
 (deftest what-the-held-out-corpora-taught
   (testing "a deref is a node: @(d/transact c [[… (+ now ttl)]]) — agentia, three misses under one"
@@ -119,6 +144,97 @@
   (testing "a bare cond-> step is a call on the threaded value, reported at the cond-> form"
     (is (= [[:boxed-math 16]] (at "(defn f [d b?] (cond-> d b? inc))")))
     (is (= [] (kinds "(defn f [^long d b?] (cond-> d b? inc))"))))
-  (testing "constructor overload is per arity: one 1-arg ctor resolves, two reflect"
-    (is (= [] (with "(defn f [s] (java.net.URL. s))" {:var-tags {"URL/new" {:returns "URL" :overloaded #{2 4}}}})))
-    (is (= [:reflection] (with "(defn f [x] (ProcessBuilder. x))" {:var-tags {"ProcessBuilder/new" {:returns "ProcessBuilder" :overloaded #{1}}}})))))
+  (testing "one constructor at the arity is taken without looking at the argument; two, and an untyped argument is Object, which fits neither"
+    (is (= [] (judged "(defn f [^String s] (java.net.URL. s))")))
+    (is (= [] (judged "(defn f [s] (java.net.URL. s))")) "URL(String) is alone at arity 1 — a cast is emitted, no reflection")
+    (is (= [:reflection] (judged "(defn f [x] (ProcessBuilder. x))")) "ProcessBuilder(List) and (String[]) — Object fits neither")))
+
+(deftest what-a-corpus-never-learned-from-taught
+  ;; clojure-mcp, blind: boxed 79/79, reflection P 0.92 R 0.75 before these.
+  (testing "one method at the arity resolves whatever the argument — the theory that (double x) reflects against a Double parameter was wrong, and the dump said so"
+    (is (= [] (judged "(defn f [^Builder b x] (.temperature b (double x)))")))
+    (is (= [] (judged "(defn f [^Builder b ^String m] (.modelName b m))"))))
+  (testing "a method whose only declarer is a non-public class reflects however it matched — (.maxRetries (int 3)) on a langchain4j builder"
+    (is (= [:reflection] (judged "(defn f [^Builder b] (.maxRetries b (int 3)))"))))
+  (testing "a constant vector is a PersistentVector, a List; a vector with a symbol in it is an IPersistentVector, which is not"
+    (is (= [] (judged "(defn f [] (ProcessBuilder. [\"sh\" \"-c\" \"ls\"]))")))
+    (is (= [:reflection] (judged "(defn f [repo] (ProcessBuilder. [\"gh\" repo]))")))
+    (is (= [:reflection] (judged "(defn f [^Builder b xs] (.anyOf b (vec xs)))")) "anyOf(List) / anyOf(array): (vec …) is an IPersistentVector, neither"))
+  (testing "a reflective step in a chain makes every later step reflect; a resolved one carries its return"
+    (is (= [:reflection :reflection] (judged "(defn f [xs] (-> (Model/builder) (.anyOf (vec xs)) (.build)))")))
+    (is (= [] (judged "(defn f [^String m] (-> (Model/builder) (.modelName m) (.build)))")))
+    (is (= [] (judged "(defn f [^String m x] (cond-> (Model/builder) x (.modelName m) :always (.build)))"))
+        "cond-> threads the builder into its member steps, so a local named like the step's argument is not the receiver"))
+  (testing "doseq and for bind the element, which the compiler never types; :let inside them binds as let"
+    (is (= [:reflection] (judged "(defn f [^java.io.File d] (doseq [x (.listFiles d)] (.isFile x)))")))
+    (is (= [] (judged "(defn f [ps] (for [p ps :let [f (clojure.java.io/file p)] :when (.exists f)] f))"))))
+  (testing "a reify method's parameters are typed by the interface"
+    (is (= [] (judged "(defn f [] (reify ToolExecutor (execute [_ request _] (.name request))))")))
+    (is (= [:reflection] (judged "(defn f [] (reify Unknown (execute [_ request _] (.name request))))"))))
+  (testing "char-array and friends are arrays"
+    (is (= [] (judged "(defn f [^java.io.Reader r] (.read r (char-array 1024)))")))))
+
+(deftest a-simple-name-with-two-classes-behind-it-is-the-file-s-import
+  ;; lume imports java.util.Date and java.sql.Date; keyed by simple name the
+  ;; dump kept sql's two constructors and (Date. (+ …)) resolved where the
+  ;; compiler, seeing util's Date(long) and Date(String), reflected.
+  (let [two {:classes {"java.util.Date" {:supers ["Object"] :ctors [{:params ["long"]} {:params ["String"]}] :methods {}}
+                       "java.sql.Date" {:supers ["Object"] :ctors [{:params ["long"]}] :methods {}}}
+             :by-simple {"Date" ["java.util.Date" "java.sql.Date"]}}]
+    (is (= #{:boxed-math :reflection}
+           (set (kinds* "(ns x (:import [java.util Date]))\n(defn f [ttl] (Date. (+ (System/currentTimeMillis) ttl)))" {:classes two})))
+        "util's Date: two 1-arg constructors, a boxed Number fits neither")
+    (is (= [:boxed-math]
+           (kinds* "(ns x (:import [java.sql Date]))\n(defn f [ttl] (Date. (+ (System/currentTimeMillis) ttl)))" {:classes two}))
+        "sql's Date: one 1-arg constructor, taken without looking")
+    (is (= [:boxed-math]
+           (kinds* "(defn f [ttl] (Date. (+ (System/currentTimeMillis) ttl)))" {:classes two}))
+        "no import to decide by: no verdict, and no false claim")))
+
+(deftest a-commented-out-step-is-not-a-step
+  (is (= [] (judged "(defn f [^String m] (-> (Model/builder) (.modelName m) #_(.logging) (.build)))"))
+      "#_(.logging) in a chain — clojure-mcp core.clj:225"))
+
+(deftest what-the-second-blind-pair-taught
+  (testing "a hint on a collection literal is a MetaExpr and types nothing"
+    (is (= [:reflection] (judged "(defn f [x] (ProcessBuilder. ^java.util.List [\"sh\" x]))"))
+        "darling-toolkit bridge.clj:265 — the compiler reflected through the hint"))
+  (testing "division of two longs is a Number, so what multiplies it boxes"
+    (is (= [[:boxed-math 20]] (at "(defn f [a b] (int (* 100.0 (/ (count a) (count b)))))")))
+    (is (= [] (kinds "(defn f [a b] (int (* 100.0 (/ (double (count a)) (count b)))))")))))
+
+(deftest hints-inside-destructuring-are-hints
+  (is (= [] (kinds "(defn f [] (let [{:keys [^java.io.Writer out]} @state] (.flush out)))")))
+  (is (= [] (kinds "(defn f [{:keys [^String s]}] (.length s))")))
+  (is (= [:reflection] (kinds "(defn f [{:keys [s]}] (.length s))"))))
+
+(deftest what-kora-core-taught-blind
+  ;; first score, before reading: boxed P 0.82 R 0.99, reflection P 0.71 R 0.88
+  (testing "each arity of a multi-arity fn carries its own hints"
+    (is (= [] (kinds "(defn f ([t] (f t 1)) ([^double t ^double p] (* (- 1 t) p)))")))
+    (is (= [:boxed-math :boxed-math] (kinds "(defn f ([t] (f t 1)) ([t p] (* (- 1 t) p)))"))))
+  (testing "the compiler never narrows on a predicate — occurrence typing retracted"
+    (is (= [:reflection] (kinds "(defn f [s] (when (and (string? s) (.startsWith s \"$\")) s))")))
+    (is (= [:reflection] (kinds "(defn f [x] (if (instance? String x) (.length x) 0))"))))
+  (testing "max and min are nary: three arguments warn"
+    (is (= [:boxed-math] (kinds "(defn f [r g b] (max r g b))"))))
+  (testing "a numeric static with a boxed Number reflects like any other — Math/abs on kora, 22 of 22"
+    (is (= #{[:boxed-math 28] [:reflection 18] [:boxed-math 13]}
+           (set (at* "(defn f [x] (- 1 (Math/abs (* 2 x))))" {:classes {:classes {"java.lang.Math" {:supers ["Object"] :methods {"abs" [{:params ["int"] :returns "int" :static? true} {:params ["long"] :returns "long" :static? true} {:params ["double"] :returns "double" :static? true}]}}} :by-simple {"Math" ["java.lang.Math"]}}})))
+        "the multiply boxes, abs reflects on its Number, the subtract boxes over abs's Object")))
+
+(deftest a-double-operand-makes-the-result-double-even-beside-an-unknown
+  ;; Numbers.divide(Object, double) coerces and returns double: the divide is
+  ;; warned, and everything over its result is primitive — kora color.clj
+  (is (= [[:boxed-math 21]] (at "(defn f [l] (let [n (/ l 100.0)] (- 1 (* 2 n))))"))
+      "only the divide boxes; n is a double, (* 2 n) and (- 1 …) are primitive"))
+
+(deftest every-top-level-form-is-compiled
+  (is (= [:boxed-math] (kinds "(register-converter :k (fn [bpm] (/ 60000 bpm)))"))
+      "kora.core translation.clj — ten misses inside one register-converter")
+  (is (= [] (kinds "(comment (defn f [a b] (+ a b)))")) "a comment form is not compiled"))
+
+(deftest an-exact-overload-wins-over-a-widening-one
+  (is (= [] (at* "(defn f [^double d] (- 1 (Math/abs d)))" {:classes {:classes {"java.lang.Math" {:supers ["Object"] :methods {"abs" [{:params ["float"] :returns "float" :static? true} {:params ["double"] :returns "double" :static? true}]}}} :by-simple {"Math" ["java.lang.Math"]}}}))
+      "a double fits abs(float) too; the compiler takes abs(double) exactly, and the answer is a primitive double"))
+

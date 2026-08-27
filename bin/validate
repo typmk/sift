@@ -1,0 +1,51 @@
+#!/usr/bin/env bb
+;; The scorecard: everything sift claims, re-measured in one run.
+;;
+;;   bin/validate            all corpora in corpora/*.edn
+;;   bin/validate lume sift  named ones
+;;
+;; For each corpus with an oracle directory (bin/oracle's output, kept at
+;; :oracle — outside the repo, because notes name private files), typeflow's
+;; predictions against the compiler's warnings, precision and recall, with
+;; the corpus's :role beside the number: an :in-sample corpus is one the
+;; rules were learned from and its score is a fit; :held-out and :blind are
+;; forecasts. A corpus whose oracle is absent is reported as SKIPPED, never
+;; silently dropped — a table of only the corpora that happened to be on
+;; this machine would read as the whole claim. Then the evidence ledger's
+;; rung counts, so how many rules are still :unjudged is printed beside
+;; the numbers that are.
+;;
+;; The unit suite (clojure -M:test) is the other half and is not run here:
+;; it is the gate, this is the measurement.
+(require '[babashka.classpath :as cp] '[babashka.fs :as fs] '[babashka.process :as p]
+         '[clojure.edn :as edn] '[clojure.string :as str])
+(def here (fs/parent (fs/parent (fs/real-path *file*))))
+(cp/add-classpath (str here "/src"))
+(require '[com.typemark.sift :as sift])
+(defn expand [s] (str/replace s #"^~" (System/getProperty "user.home")))
+(let [names (set *command-line-args*)
+      manifests (->> (fs/glob (str here "/corpora") "*.edn") (map str) sort
+                     (map #(edn/read-string (slurp %)))
+                     (filter #(or (empty? names) (names (:name %)))))]
+  (println "typeflow vs the host compiler — bin/falsify per corpus")
+  (printf "%-12s %-10s %-11s %s%n" "corpus" "role" "kind" "oracle predicted tp fp fn  precision recall")
+  (doseq [{:keys [name root oracle role]} manifests
+          :let [root (expand root) oracle (expand oracle)]]
+    (if-not (and (fs/exists? (str oracle "/notes.edn")) (fs/exists? root))
+      (printf "%-12s %-10s SKIPPED — %s%n" name (clojure.core/name role)
+              (if (fs/exists? root) (str "no oracle at " oracle " (run bin/oracle in the project)") (str "no source at " root)))
+      (doseq [kind ["boxed-math" "reflection"]]
+        (let [{:keys [out]} (p/sh {:dir root} "bb" (str here "/bin/falsify") (str oracle "/notes.edn") kind "." "." "--oracle" oracle)
+              line (first (filter #(str/starts-with? % (str ":" kind)) (str/split-lines out)))
+              pr (first (filter #(str/starts-with? % "precision") (str/split-lines out)))
+              nums (when line (re-seq #"\d+" line))]
+          (printf "%-12s %-10s %-11s %s  %s%n" name (clojure.core/name role) kind
+                  (if nums (str/join " " (map #(format "%4s" %) nums)) "?")
+                  (or (some-> pr (str/replace "precision " "P ") (str/replace "recall " "R ")) ""))))))
+  (println)
+  (println "evidence ledger — src/com/typemark/sift/evidence.edn")
+  (doseq [[rung rules] (sort-by key (group-by (comp :evidence val) (:rules sift/evidence)))]
+    (printf "  %-10s %3d  %s%n" (clojure.core/name rung) (count rules)
+            (if (= rung :unjudged) (str/join " " (sort (map (comp clojure.core/name key) rules))) "")))
+  (println)
+  (println "the gate is the suite: clojure -M:test"))

@@ -1,0 +1,7 @@
+;; a corpus bin/validate judges typeflow on. :role is the honest label —
+;; :in-sample was learned from, :held-out was judged after the rules were
+;; written, :blind was never read before its first score was recorded.
+{:name "agentia"
+ :root "~/GitHub/agentia/lib"
+ :oracle "~/.cache/sift/oracles/agentia"
+ :role :held-out}

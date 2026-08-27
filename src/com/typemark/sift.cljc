@@ -22,7 +22,8 @@
   code it measures runs your side effects on the CI box. A REPL-side consumer
   that has already loaded the code is a different context and may rank higher;
   this surface is for the one that has not."
-  (:require [clojure.string :as str]
+  (:require #?(:clj  [com.typemark.sift.data-rules :refer [load-edn]]
+               :cljs [com.typemark.sift.data-rules :refer-macros [load-edn]]) [clojure.string :as str]
             [com.typemark.sift.access :as access]
             [com.typemark.sift.analysis :as analysis]
             [com.typemark.sift.callgraph :as callgraph]
@@ -139,19 +140,34 @@
 
 ;; ── one entry point ────────────────────────────────────────────────────────
 
+(def evidence
+  "evidence.edn — what every rule's verdict rests on, as data. See the file."
+  (load-edn "evidence.edn"))
+
+(defn evidence-of
+  "The rung a rule stands on: its own entry, else its family's, else
+  :unjudged — which is what an unlisted rule IS."
+  [rule family]
+  (or (get-in evidence [:rules rule :evidence])
+      (get-in evidence [:families family])
+      :unjudged))
+
 (defn- normalize
   "Every finding, whatever produced it, in one shape: a keyword :rule, a
   :family naming the producer, a :category, an :applicability, an
-  :instruction. The node-stream rules predate the last three and carried
-  a string rule; nothing downstream should have to know which family a
-  finding came from to read it."
+  :instruction, and an :evidence rung from evidence.edn. The node-stream
+  rules predate the last four and carried a string rule; nothing
+  downstream should have to know which family a finding came from to read
+  it, or which README paragraph to trust it by."
   [family category f]
-  (-> f
-      (update :rule #(if (keyword? %) % (keyword %)))
-      (update :family #(or % family))
-      (update :category #(or % category))
-      (update :applicability #(or % :unspecified))
-      (update :instruction #(or % (:message f)))))
+  (let [rule (if (keyword? (:rule f)) (:rule f) (keyword (:rule f)))
+        fam (or (:family f) family)]
+    (-> f
+        (assoc :rule rule :family fam)
+        (update :category #(or % category))
+        (update :applicability #(or % :unspecified))
+        (update :instruction #(or % (:message f)))
+        (assoc :evidence (evidence-of rule fam)))))
 
 (defn- prose-for
   "The prose findings for `path` out of a `prose-findings` map, whose keys
@@ -175,7 +191,10 @@
      :prose      (sift/prose-findings kondo-json), optional — built once
                  per analysis, this picks the entries for :path
      :tenanted?  (sift/tenanted? texts) over the corpus; default true.
-                 false switches unscoped-tenant-query off as vacuous}
+                 false switches unscoped-tenant-query off as vacuous
+     :var-tags   {ns/name tag} — bin/oracle's :vars plus sift/var-tags
+     :classes    bin/oracle's :classes — the host's own method, constructor
+                 and field table; typeflow judges overloads with it}
 
   -> {:ok? true
       :findings [f …]   every rule family, normalised — see `normalize`:
@@ -186,7 +205,7 @@
   or {:ok? false :error msg} when the source does not read. A consumer that
   wants one family filters on :family — :node :shape :complexity :prose —
   rather than calling four functions."
-  [{:keys [text path test? resolution prose var-tags tenanted?] :or {tenanted? true}}]
+  [{:keys [text path test? resolution prose var-tags classes tenanted?] :or {tenanted? true}}]
   (let [{:keys [ok? nodes error]} (p/parse text)]
     (if-not ok?
       {:ok? false :error (or error "unparseable")}
@@ -202,7 +221,7 @@
                                              :instruction "Split the unit: one branch per helper, or lift the nested lambda that carries the score."))
                         (complexity/findings text path))
             doc    (map #(normalize :prose :readability %) (prose-for prose path))
-            flow   (->> (typeflow/findings text path {:var-tags var-tags :resolution resolution})
+            flow   (->> (typeflow/findings text path {:var-tags var-tags :classes classes :resolution resolution})
                         ;; the two host rules already arrive via shape/findings
                         (remove #(contains? #{:js-prop-on-own-object :reflection-unwarned} (:rule %)))
                         (map #(normalize :typeflow :warning

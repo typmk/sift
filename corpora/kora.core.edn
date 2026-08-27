@@ -1,0 +1,12 @@
+;; a corpus bin/validate judges typeflow on. :role is the honest label —
+;; :in-sample was learned from, :held-out was judged after the rules were
+;; written, :blind was never read before its first score was recorded.
+{:name "kora.core"
+ :root "~/GitHub/kora.core/src"
+ :oracle "~/.cache/sift/oracles/kora.core"
+ ;; first score, before any of it was read (2026-08-27), against the
+ ;; complete oracle: boxed P 0.82 R 0.99, reflection P 0.71 R 0.88. The
+ ;; first oracle was itself wrong — assay's 256 KB sink had dropped 2,300
+ ;; notes — and read as P 0.25. Learned from since; a role only moves this
+ ;; way.
+ :role :held-out}

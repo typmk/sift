@@ -147,62 +147,61 @@ never *this is well-typed*, only *the compiler will not know this tag here*.
 `hosts.edn` makes a dialect a row (JVM, JS, …); `concepts.edn` (vendored
 from clojure-runtime-book) is the lattice above the host.
 
-**Judged before believed — `bin/falsify`, against assay's notes:**
+**Judged before believed — `bin/validate`, against the host compiler.**
+`bin/oracle`, run where a project loads, writes what the JVM knows:
+assay's reflection and boxed-math notes, the list of files that actually
+compiled, every var's return tag, and a class table — supertypes, fields,
+constructors and methods with parameter types and whether a public class
+declares them — for every class the corpus imports, hints, calls or
+constructs and what those return. `typeflow` then runs the compiler's own
+rules over it: `Compiler.paramArgTypeMatch` and `getMatchingParams`, one
+method at an arity taken without looking, `getAsMethodOfPublicBase`, a
+`NewExpr` keeping its class whether or not the constructor resolved, a
+constant `["a" "b"]` being a `PersistentVector` (a `List`) where `["a" x]`
+is an `IPersistentVector` (not one), `true` being a `Boolean`, `doseq`
+binding an element the compiler never types, `..` steps with no dot, a
+`^Hint` on a `->` step, a nested `cond->` starting from the threaded value,
+`with-open`'s implicit `.close`, and a simple name with two classes behind
+it resolved by the file's `:import`. Every one of those was a miss or a
+false positive on real code first, and every one is a test.
 
-| corpus | boxed-math | reflection |
+| corpus | first score, blind | now | 
 |---|---|---|
-| lume (JVM, 335 notes, 91 files), text alone | P 0.87 R 0.98 | P 0.68 R 0.96 |
-| lume, resolution + var tags, 2026-08-27 morning | P 0.87 R 0.98 | P 0.81 R 0.96 |
-| **lume, resolution + var tags + class dump** | **106 / 106 — P 1.00 R 1.00** | **26 / 26 — P 1.00 R 1.00** |
-| sift itself (JVM, 102 notes, 32 files) — held out | **48 / 48** | oracle empty (fully hinted); 0 predicted |
-| agentia `lib/` (JVM, 2 files loaded) — held out | **12 / 12** | 1 / 2 — `(ProcessBuilder. [a-vector])` reflects and the model says it resolves |
-| defnet (JS, Closure) | n/a | **648 predicted, 0 warned — the model was wrong, and JS predicts nothing** |
+| lume (91 files, 335 notes) | in-sample — learned from | boxed **106 / 106**, reflection **26 / 26** |
+| sift (32 files, 102 notes) | held-out | boxed **56 / 56**, reflection: oracle empty, 0 predicted |
+| agentia `lib/` (3 files) | held-out | boxed **16 / 16**, reflection **3 / 3** |
+| clojure-mcp (74 files, 517 notes) | boxed 79/79 · reflection **P 0.92 R 0.75** | boxed **79 / 79**, reflection **211 / 211** |
+| darling-toolkit (29 files, 71 notes) | boxed 38/39 · reflection **P 0.85 R 0.85** | boxed **39 / 39**, reflection **20 / 20** |
+| kora.core (22 files, 3,080 notes) | boxed **P 0.82 R 0.99** · reflection **P 0.71 R 0.88** | boxed **3,055 / 3,055**, reflection **25 / 25** |
+| defnet (JS, Closure) | — | 648 predicted, 0 warned: the JS model is wrong and predicts nothing |
 
-Lume is IN-SAMPLE: every rule below was learned from a miss there, so its
-1.00 is a fit, not a forecast. Sift and agentia were re-judged from fresh
-notes after the lume work and are the honest number; the four misses they
-still had (`@(d/transact …)` never walked, `.indexOf` read as `int` on a
-receiver that reflected, `cond-> x t inc`, a `.cljc` catch class inside
-`#?(…)`) are fixed and in the test, and the one left is named above.
+**The forecasts are the "first score" column** — each taken before a line
+of that corpus was read. Everything in "now" is a fit. What the three
+blind corpora taught was never a corpus's oddity but a compiler fact the
+model lacked: one method at an arity is taken without looking at the
+argument; a method declared only on a package-private class reflects; an
+untyped argument is `Object` and fits only an `Object` parameter; a
+constant `["a" "b"]` is a `List` and `["a" x]` is not; a `^List` hint on
+a vector literal is a `MetaExpr` and types nothing; `true` is a `Boolean`;
+`max`/`min` are nary; `(/ long long)` is a `Number`; `Numbers.add(double,
+Object)` returns a `double`; a `double` fits `abs(float)` too and the
+compiler takes the exact one; a simple name with two classes behind it is
+the file's `:import`; every top-level form compiles, `(register-converter
+:k (fn …))` included; each arity of a `defn` carries its own hints; and
+**the compiler never narrows on a predicate** — occurrence typing, which
+had moved lume by one finding, is retracted. Each is one test. And twice
+the instrument was wrong before the model was: five of lume's misses were
+files the compiler never compiled, and kora's first oracle had lost 2,300
+notes to assay's 256 KB sink and read as P 0.25. `corpora/*.edn` carries
+each corpus's role and first score, and a role only ever moves one way.
 
-**What closed lume's 16 boxed and 10 reflection misses, in order of
-yield.** Five were not misses: they were in test files the compiler had
-never compiled. `bin/assay-notes` now writes `loaded.edn` beside
-`notes.edn` and `bin/falsify --loaded` judges only those files — a file
-with no note is either clean or never loaded, and notes alone cannot say
-which. Then the model: only the two-argument comparison is `:inline`, so
-`(<= 200 status 299)` is a plain call and never warns (`:inline-arities`
-in `hosts.edn`; `mod` has no `:inline` at all); `prometheus/inc` is not
-`inc`; `alength` is an `int` and `abs` keeps its operand's primitive; a
-`^:const` def is inlined as its literal; a constructor is its CLASS, not
-"host"; `if-let` and `cond` whose branches agree carry the tag; a static
-field as an argument is known. And the one a text pass cannot take:
-`bin/var-tags <analysis> <src-root>` now also dumps **host method returns
-and per-arity overloads** for every class the corpus imports, hints,
-calls statically or constructs, plus one level of what those return —
-`"HttpURLConnection/.getResponseCode" "int"`,
-`"OutputStreamWriter/.write" {:returns "void" :overloaded #{1 3}}`,
-`"ProcessBuilder/new" {:overloaded #{1}}` — so `(.write w ev)` on a known
-writer with an untyped `ev` is predicted reflective, and `(URL. s)` with
-one 1-arg constructor is not. 5,023 entries for lume, 131 classes.
-
-The step from 0.68 to 0.81 is **return tags on vars**, which a text pass
-cannot see and the compiler reads: the corpus's own `(defn ^Tag f …)` /
-`(defn f ^Tag […])` via `sift/var-tags` over its trees, and libraries' via
-`bin/var-tags` on the JVM — `(:tag (meta v))` *or the first arglist's tag*,
-because `clojure.data.json/write-str` keeps its `^String` on the arglist and
-none of its vars carry one. Both join at the call form's position through
-kondo's resolution. clj-kondo itself strips hints (`arglist-strs` gives
-`[s]` for `[^String s]`), which is why the trees are read. Occurrence typing
-(Tobin-Hochstadt & Felleisen, `:narrows` in `hosts.edn`) is in and correct
-and moved lume by one finding — it rarely guards interop with a predicate.
-
-What the misses are: a bare `inc` inside `cond->` (threading expansion),
-and a receiver bound by destructuring. Every rule in `hosts.edn` was learned
-from a false positive or a miss on real code and says which. defnet's
-`ingest op=scan` runs two passes so cross-file return hints count and lands
-these as `:sift/boxed-math` / `:sift/reflection` on definitions;
-`op=hostwarn` lands the compiler's own answer beside them.
+**Text alone is not the claim any more.** Without `bin/oracle`'s table the
+walker still runs — hints, literals, casts, `hosts.edn`'s short core and
+host-return tables — and predicts less: it cannot know that `.setJdbcUrl`
+is alone at its arity or that `maxRetries` is declared on a package-private
+base. `evidence.edn` carries `:compiler` for these three rules because the
+dump is how they are judged, and `bin/validate` prints SKIPPED, never a
+smaller table, for a corpus whose oracle is not on the machine.
 
 **The node families, read the corpus way — no compiler judges these, so a
 person did.** Every `:node` finding on lume `src` (91 files), sift and
@@ -242,6 +241,19 @@ measures (ncloc, comment lines, functions, classes, statements) and the
 node-stream shape for a consumer that has only nodes; sonar-clojure's
 sensor passes text now. A top-level form outside any unit is not scored,
 as Sonar does not score it.
+
+**How to validate what this README claims.** Three commands, in order of
+what they prove: `clojure -M:test` is the gate (110 tests / 470
+assertions — corpus flag/clear pairs, every learned compiler fact, and
+`evidence_test`, which fails on any registered rule without an entry in
+`evidence.edn`); `bin/validate` is the measurement (typeflow against the
+compiler on every corpus in `corpora/`, in-sample and held-out labelled,
+plus the ledger's rung counts, so the number of rules still `:unjudged` is
+printed beside the numbers that are not); and `bin/sift lint` prints each
+finding's rung in brackets, so a reader of one line knows whether it rests
+on the compiler, a parity run, a corpus, a reading, or nothing yet. A new
+corpus is `bin/oracle` in that project plus one `corpora/<name>.edn` with
+`:role :blind` — and its first score is the one to keep.
 
 **Every finding carries** `:rule`, `:category` (Credo's `:refactor`
 `:readability` `:design` `:warning` `:consistency`), `:instruction`, and an

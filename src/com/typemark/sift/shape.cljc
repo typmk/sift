@@ -18,12 +18,13 @@
   `^:places/allow` on the binding peels a finding, as it did."
   (:require [com.typemark.sift.cond-case :as cond-case]
             [com.typemark.sift.fold :as fold]
+            [com.typemark.sift.loop-fold :as loop-fold]
             [com.typemark.sift.map-loop :as map-loop]
             [com.typemark.sift.resolve :as resolve]
             [rewrite-clj.parser :as parser]
             [rewrite-clj.zip :as z]))
 
-(def rules #{fold/rule map-loop/rule cond-case/rule})
+(def rules #{fold/rule map-loop/rule loop-fold/rule cond-case/rule})
 
 (defn- findings*
   [text file]
@@ -33,9 +34,12 @@
   (let [zloc (try (z/edn* (parser/parse-string-all text) {:track-position? true})
                   (catch #?(:clj Exception :cljs :default) _ nil))]
     (if zloc
-      (-> (vec (fold/findings file zloc))
-          (into (map-loop/findings file zloc))
-          (into (cond-case/findings file zloc)))
+      (let [maps (map-loop/findings file zloc)
+            taken (into #{} (map (juxt :line :column)) maps)]
+        (-> (vec (fold/findings file zloc))
+            (into maps)
+            (into (loop-fold/findings file zloc taken))
+            (into (cond-case/findings file zloc))))
       [])))
 
 (defn findings

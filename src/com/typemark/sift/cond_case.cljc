@@ -9,7 +9,12 @@
   them is reported without a counterpart.
 
   Two clauses at least. One `(= x :a)` and an `:else` is an `if`, and saying
-  so is a different rule."
+  so is a different rule.
+
+  A `cond` with no `:else` returns nil when nothing matches; a `case` with no
+  default THROWS. The counterpart carries an explicit `nil` default for that
+  reason — measured in clojure.core itself, two of seven hits had no `:else`,
+  and the shorter rewrite would have changed what they return."
   (:require [rewrite-clj.zip :as z]))
 
 (def rule :cond-as-case)
@@ -104,7 +109,7 @@
             (assoc :counterpart
                    (concat (list 'case x)
                            (mapcat (fn [[k [_ expr]]] [k expr]) (map vector ks body))
-                           (when else? [(second (last cs))])))))))))
+                           [(if else? (second (last cs)) nil)]))))))))
 
 (defn findings
   [file zloc]

@@ -109,7 +109,8 @@
     (is (every? #(= :mechanical (:applicability %)) fs))
     (is (= '(case x :circle "round" :square "boxy" :line "thin" "unknown")
            (:counterpart (first fs))))
-    (is (= '(case n 200 :ok 404 :missing) (:counterpart (second fs))))))
+    (is (= '(case n 200 :ok 404 :missing nil) (:counterpart (second fs)))
+        "no :else -> explicit nil default, because case would throw where cond returns nil")))
 
 (deftest cond-over-vars-is-not-a-case-and-over-nil-is-a-maybe
   (is (empty? (shape/findings "(defn f [x] (cond (= x foo) 1 (= x bar) 2))" "s.clj"))
@@ -118,3 +119,20 @@
     (is (= 1 (count fs)))
     (is (= :maybe (:applicability (first fs))))
     (is (nil? (:counterpart (first fs))))))
+
+;; ---- loop-as-reduce ---------------------------------------------------------
+
+(deftest loop-threading-an-accumulator-is-a-reduce
+  (let [fs (lint (at "flag/loop_reduce.clj"))]
+    (is (= [:loop-as-reduce :loop-as-reduce :loop-as-reduce] (map :rule fs)))
+    (is (every? #(= :mechanical (:applicability %)) fs))
+    (is (= '(reduce (fn [acc x] (+ acc x)) 0 nums) (:counterpart (first fs))))
+    (is (= '(reduce (fn [acc r] (assoc acc (:id r) r)) {} rows) (:counterpart (second fs)))
+        "binding order reversed, empty? test, let-bound element")
+    (is (= '(reduce (fn [best x] (if (> (count x) (count best)) x best)) nil words)
+           (:counterpart (nth fs 2))))))
+
+(deftest a-loop-that-is-a-map-is-reported-once
+  (let [fs (lint (at "flag/loop_map.clj"))]
+    (is (= 1 (count fs)))
+    (is (= :loop-as-map (:rule (first fs))))))

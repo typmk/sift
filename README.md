@@ -18,15 +18,21 @@ because they need the tree:
     (sift/unit-complexity source path)     ; per-unit cognitive, cyclomatic,
                                            ; max nesting, params, children
     (sift/complexity-findings source path) ; units over 15 (Sonar's default)
-    (sift/shape-findings source path)      ; place-as-fold, loop-as-map, cond-as-case
+    (sift/shape-findings source path)      ; place-as-fold, loop-as-map,
+                                           ; loop-as-reduce, cond-as-case
     (sift/shape-findings source path (sift/resolution kondo-analysis-json))
 
 `complexity` follows Campbell's paper (SonarSource 2017) and was measured
 identical to cccc-core on 5,519 of 5,531 units of defnet; the 12 are lambdas
 inside `(comment …)`, which this treats as data. `shape` is the `places` rule
 set from agentia — an atom used as a fold, a loop that is a map — plus a
-`cond` over literals that is a `case`, with its corpus as the spec under
-`test/…/corpus/{clear,flag,resolved}`.
+loop that threads an accumulator (a `reduce`) and a `cond` over literals (a
+`case`), with its corpus as the spec under `test/…/corpus/{clear,flag,resolved}`.
+A rule enters only with a flag file that fires and a clear file that stays
+silent; and every rule is run over real code before it lands — the four fire
+0 / 0 / 0 / 1 times on defnet's own source and 3 / 0 / 1 / 7 on clojure.core,
+each hit read. A `cond` with no `:else` gets a `case` with an explicit `nil`
+default, because the shorter rewrite throws where the original returned nil.
 
 **sift never resolves a symbol; clj-kondo does, and sift reads it.** With an
 analysis (`clj-kondo --config '{:analysis {:locals true} :output {:format
@@ -69,7 +75,7 @@ nothing should.
 
     clojure -M:test
 
-82 tests, 256 assertions. `sonar-clojure` runs the same files a second time
+84 tests, 265 assertions. `sonar-clojure` runs the same files a second time
 through its own `:test` alias (`-d ../sift/test`): this harness proves the
 library stands alone, that one proves it still fits the consumer.
 

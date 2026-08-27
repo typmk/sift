@@ -53,21 +53,20 @@
                                     (re-find #"(?i)anti-forgery|csrf" (:text n))))
                        nodes)]
      (when (and methods (not guarded))
-       ;; a route METHOD is a map key whose value is a map — {:post {:handler
-       ;; h}}. `:delete` as an argument to (crud-decision … :delete id) is an
-       ;; operation, and {:delete (partial delete-op …)} is a dispatch table;
-       ;; both fired on lume, neither is a route.
+       ;; a route METHOD is a map key in route DATA — ["/pay" {:post h}]:
+       ;; the map's parent is a vector whose first element is the path.
+       ;; `:delete` as an argument to (crud-decision … :delete id) is an
+       ;; operation and {:delete (partial delete-op …)} a dispatch table;
+       ;; both fired on lume, neither is a route. reitit takes a bare
+       ;; handler as the value, so the value's shape cannot decide it.
        (for [n (take 1 (filter #(and (= :keyword (:type %))
                                      (contains? state-changing (:text %))
-                                     (let [p (tree/parent nodes %)]
-                                       (and p (= :map (:tag p))
-                                            (let [v (->> (tree/children-of nodes p)
-                                                         (filter (fn [k] (and (= (:depth %) (:depth k))
-                                                                              (not= :trivia (:type k))
-                                                                              (or (> (:line k) (:line %))
-                                                                                  (and (= (:line k) (:line %)) (> (:col k) (:col %)))))))
-                                                         first)]
-                                              (and v (= :map (:tag v)))))))
+                                     (let [p (tree/parent nodes %)
+                                           v (when p (tree/parent nodes p))]
+                                       (and p (= :map (:tag p)) v (= :vector (:tag v))
+                                            (= :string (:type (first (remove (fn [k] (= :trivia (:type k)))
+                                                                             (filter (fn [k] (= (inc (:depth v)) (:depth k)))
+                                                                                     (tree/children-of nodes v)))))))))
                                nodes))]
          {:rule "csrf-protection-absent"
           :line (:line n) :col (:col n) :end-line (:end-line n) :end-col (:end-col n)

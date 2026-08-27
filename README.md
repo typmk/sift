@@ -213,13 +213,17 @@ response keys (4/4; now only a call argument under a mode-setting head,
 via `tree/parent`); `hardcoded-credential` on `ceremony-secret-type`
 bound to a slug (4/4; a name ending `-type`/`-kind`/`-name`/… names a
 kind of secret, not one); `unscoped-tenant-query` on agentia's single-user
-ledger (5/5; a file that never says owner, org or tenant has no tenant to
-scope by, and the rule is vacuous there — refused, the boundary checker's
-rule); `csrf-protection-absent` on `:delete` as a call argument and as a
-dispatch-table key (a route method is a map key whose VALUE is a map);
+ledger (5/5; a CORPUS that never says owner, org or tenant has no tenant
+to scope by, and the rule is vacuous there — refused, the boundary
+checker's rule; `sift/tenanted?` over the corpus, passed as `:tenanted?`,
+because per FILE it silenced a one-query fixture that must fire, and
+sonar-clojure's rule tests caught that); `csrf-protection-absent` on
+`:delete` as a call argument and as a dispatch-table key (a route method
+is a map key inside `["/path" {…}]`; reitit takes a bare handler as the
+value, so the value's shape cannot decide it — the same fixtures);
 `side-effect-in-swap` on `(reset! decision …)` of a `let`-local atom
 inside `swap!` — idempotent under retry, the CAS-with-a-decision idiom.
-What remains is a review list, not a defect list: 34 `unscoped-tenant-query`
+What remains is a review list, not a defect list: 43 `unscoped-tenant-query`
 on lume, 8 `ambiguous-owner-check`, 2 CSRF on token-authenticated routes —
 all `:unspecified`, and whether any is a defect needs the data model, which
 sift does not hold. That is the honest ceiling for a node rule without a

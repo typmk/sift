@@ -82,11 +82,25 @@
     (boolean (some #(and (:text %) (re-find denial (:text %)))
                    (tree/children-of nodes (or encl n))))))
 
+(defn tenanted?
+  "Does any of these source texts say owner, org or tenant at all? A corpus
+  that never does has no tenant to scope a query by — agentia's single-user
+  ledger, five of five findings wrong — and `unscoped-tenant-query` is
+  vacuous over it. Judged over the CORPUS, not the file: a one-query
+  fixture says nothing about tenancy and must still fire, and sonar-clojure's
+  rule tests say so."
+  [texts]
+  (boolean (some #(and (string? %) (re-find tenant-word %)) texts)))
+
 (defn- mentions? [nodes n re]
   (boolean (some #(and (:text %) (re-find re (:text %)))
                  (cons n (tree/children-of nodes n)))))
 
-(defn findings [nodes]
+(defn findings
+  "`:tenanted? false` — from `tenanted?` over the corpus — switches the
+  query rule off; the default keeps it on, which is the contract sonar's
+  sensor and its fixtures hold."
+  [nodes & {:keys [tenanted?] :or {tenanted? true}}]
   (concat
    (for [l (tree/lists-headed-by nodes two-valued)
          :let [a (tree/first-argument nodes l)]
@@ -96,14 +110,11 @@
       :message (str "two-valued test on the tenant boundary: nil owner means both"
                     " untenanted and unresolved, and both would take this branch")})
 
-   ;; A file that never says owner, org or tenant anywhere has no tenant to
-   ;; scope a query by, and every query in it would be reported: agentia's
-   ;; single-user ledger, five of five. The rule is vacuous there, and a
-   ;; vacuous rule is refused rather than run — the boundary checker's rule.
+   ;; A vacuous rule is refused rather than run — the boundary checker's
+   ;; rule — and `tenanted?` over the corpus is what decides.
    (let [defining (into #{} (mapcat #(map :text (tree/children-of nodes %)))
                         (tree/lists-headed-by nodes #{"defrecord" "deftype" "extend-type"
-                                                      "extend-protocol" "reify" "defprotocol"}))
-         tenanted? (boolean (some #(and (:text %) (not (:commented? %)) (re-find tenant-word (:text %))) nodes))]
+                                                      "extend-protocol" "reify" "defprotocol"}))]
      (for [l (tree/lists-headed-by nodes query-fns)
            :when tenanted?
            :when (not (mentions? nodes l tenant-word))

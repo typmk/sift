@@ -109,6 +109,7 @@
   ([text path] (complexity/findings text path))
   ([text path threshold] (complexity/findings text path threshold)))
 (defn symbols   "Symbol table, from clj-kondo analysis." [text]   (analysis/symbols text))
+(defn tenanted? "Does the corpus name a tenant anywhere? see access/tenanted?" [texts] (access/tenanted? texts))
 
 ;; ── rules ──────────────────────────────────────────────────────────────────
 
@@ -172,7 +173,9 @@
      :test?      run the test-only rules too
      :resolution (sift/resolution kondo-json), optional
      :prose      (sift/prose-findings kondo-json), optional — built once
-                 per analysis, this picks the entries for :path}
+                 per analysis, this picks the entries for :path
+     :tenanted?  (sift/tenanted? texts) over the corpus; default true.
+                 false switches unscoped-tenant-query off as vacuous}
 
   -> {:ok? true
       :findings [f …]   every rule family, normalised — see `normalize`:
@@ -183,11 +186,14 @@
   or {:ok? false :error msg} when the source does not read. A consumer that
   wants one family filters on :family — :node :shape :complexity :prose —
   rather than calling four functions."
-  [{:keys [text path test? resolution prose var-tags]}]
+  [{:keys [text path test? resolution prose var-tags tenanted?] :or {tenanted? true}}]
   (let [{:keys [ok? nodes error]} (p/parse text)]
     (if-not ok?
       {:ok? false :error (or error "unparseable")}
-      (let [node   (concat (for [[cat f] node-rules, x (f nodes)] (normalize :node cat x))
+      (let [node   (concat (for [[cat f] node-rules
+                                 ;; the one rule with a corpus-level switch — see access/tenanted?
+                                 x (if (= f access/findings) (f nodes :tenanted? tenanted?) (f nodes))]
+                             (normalize :node cat x))
                            (when test? (map #(normalize :node :design %) (tests/findings nodes))))
             shape  (map #(normalize :shape :refactor %) (shape/findings text path resolution))
             cx     (complexity/report text path)

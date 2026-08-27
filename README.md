@@ -43,11 +43,29 @@ parameter is flagged; with it, the reverse. Measured on defnet: no change in
 17 findings — the input is there for codebases that need it, not because this
 one did.
 
+**The host boundary, as far as the source states it** — `host.cljc`:
+`catch-all-swallow`, `mutable-escape`, `js-prop-on-own-object` (counterpart
+`(aget o "k")`), `reflection-unwarned`. What the source cannot state, the
+host compiler writes with positions, and defnet's `ingest op=hostwarn` reads
+that log. On first contact `js-prop-on-own-object` found a `(set! (.-k props)
+…)` on a `#js` literal in defnet's viewer — the `:advanced` rename trap it
+had already shipped once.
+
+**Every finding carries** `:rule`, `:category` (Credo's `:refactor`
+`:readability` `:design` `:warning` `:consistency`), `:instruction`, and an
+`:applicability` on clippy's four rungs — `:machine-applicable`,
+`:maybe-incorrect`, `:has-placeholders`, `:unspecified` — so an editor knows
+what it may apply unasked. `shape/rules` is the registry; `zip.cljc` is the
+one zipper vocabulary every rule reads the tree with.
+
 ## The CLI
 
     bin/sift shape <path>…                    # findings, exit 1 if any
     bin/sift complexity [--threshold N] <path>…
     bin/sift shape --edn src                  # as data
+    bin/sift shape --analysis kondo.json src  # resolve through clj-kondo
+    bin/sift shape --write-baseline b.edn src # freeze today's findings …
+    bin/sift shape --baseline b.edn src       # … and report only new ones
 
 A babashka script over the same namespaces, for a lint task or a prompt. defnet's
 `ingest op=scan` is the same rules attached to graph definitions.
@@ -75,7 +93,7 @@ nothing should.
 
     clojure -M:test
 
-84 tests, 265 assertions. `sonar-clojure` runs the same files a second time
+90 tests, 288 assertions. `sonar-clojure` runs the same files a second time
 through its own `:test` alias (`-d ../sift/test`): this harness proves the
 library stands alone, that one proves it still fits the consumer.
 

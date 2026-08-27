@@ -22,76 +22,22 @@
 ;; specific pattern goes above the general one it overlaps —
 ;; (if (not ?t) ?a nil) above both (if ?t ?a nil) and (if (not ?t) ?a ?b).
 ;;
+;; NOT HERE: what splint (noahtheduke/splint, in the estate's `lint:style`)
+;; already says. Measured 2026-08-27 on this corpus, six data rules were
+;; splint rules under other names and were removed — lint/if-else-nil,
+;; lint/if-not-both, style/when-not-call, style/eq-zero, lint/not-empty?,
+;; style/apply-str-interpose. A rule enters here only when splint's 108
+;; rules (36 lint, 57 style, 6 naming, 7 performance, 2 metrics) do not
+;; carry it; the differentiator is shape, complexity, the host boundary and
+;; the graph, not idiom.
+;;
 ;; THE GATE IS UNCHANGED BY THE FORMAT: a rule enters with a flag file
 ;; that fires and a clear file that stays silent
 ;; (test/…/corpus/{flag,clear}/data_rules*.clj), and every hit on real code
 ;; is read before it lands. Being data makes a rule cheap to write, not
 ;; cheap to trust.
 
-[{:id :if-not-nil-else-is-when-not
-  :kind :rewrite
-  :match (if (not ?t) ?a nil)
-  :emit (when-not ?t ?a)
-  :category :readability
-  :applicability :machine-applicable
-  :message "if over a negated test with a nil else is when-not"
-  :instruction "Use when-not; drop the not and the trailing nil."}
-
- {:id :if-nil-else-is-when
-  :kind :rewrite
-  :match (if ?t ?a nil)
-  :emit (when ?t ?a)
-  :category :readability
-  :applicability :machine-applicable
-  :message "if with a nil else is when"
-  :instruction "Use when for a one-armed conditional; drop the trailing nil."}
-
- {:id :if-not-not
-  :kind :rewrite
-  :match (if (not ?t) ?a ?b)
-  :emit (if-not ?t ?a ?b)
-  :category :readability
-  :applicability :machine-applicable
-  :message "if over a negated test is if-not"
-  :instruction "Use if-not and drop the not."}
-
- {:id :when-not-not
-  :kind :rewrite
-  :match (when (not ?t) ?&body)
-  :emit (when-not ?t ?&body)
-  :category :readability
-  :applicability :machine-applicable
-  :message "when over a negated test is when-not"
-  :instruction "Use when-not and drop the not."}
-
- {:id :count-zero-is-empty
-  :kind :rewrite
-  :match (= (count ?x) 0)
-  :emit (empty? ?x)
-  :category :readability
-  :applicability :machine-applicable
-  :message "(= (count x) 0) is (empty? x), and does not walk a seq to count it"
-  :instruction "Use empty?; count realises a lazy seq to the end."}
-
- {:id :not-empty-is-seq
-  :kind :rewrite
-  :match (not (empty? ?x))
-  :emit (seq ?x)
-  :category :readability
-  :applicability :maybe-incorrect
-  :message "(not (empty? x)) is (seq x) — truthy either way, but seq returns the seq"
-  :instruction "Use seq; the value is the seq rather than true, which matters only where a boolean is stored."}
-
- {:id :apply-str-interpose-is-join
-  :kind :rewrite
-  :match (apply str (interpose ?sep ?xs))
-  :emit (clojure.string/join ?sep ?xs)
-  :category :readability
-  :applicability :machine-applicable
-  :message "apply str over interpose is clojure.string/join"
-  :instruction "Use clojure.string/join."}
-
- ;; NOT (some ?p ?xs): some returns what p returned, not the element.
+[;; NOT (some ?p ?xs): some returns what p returned, not the element.
  ;; Measured on defnet — all ten hits were (first (filter #(= id (:id %))
  ;; xs)), and the shorter rewrite would have returned true. maybe-incorrect
  ;; because a nil or false element is found by first and skipped by some.

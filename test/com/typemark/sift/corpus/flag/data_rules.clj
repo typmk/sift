@@ -1,13 +1,6 @@
 (ns data-rules)
 
-(defn a [t x] (if t x nil))
-(defn b [t x y] (if (not t) x y))
-(defn c [t x] (when (not t) (println x) x))
-(defn d [xs] (= (count xs) 0))
-(defn e [xs] (not (empty? xs)))
-(defn f [xs] (apply str (interpose ", " xs)))
+;; only what splint does not say — see rules.edn's header
 (defn g [xs] (first (filter even? xs)))
 (defn h [k] (cond (= k :a) 1 (= k :b) 2 :else 3))
-(defn i [s] (try (Integer/parseInt s) (catch Exception _ nil)))
 (defn j [] (Thread/sleep 100))
-(defn l [t x] (if (not t) x nil))

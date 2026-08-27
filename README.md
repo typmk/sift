@@ -70,7 +70,12 @@ lines in `corpus/{flag,clear}/data_rules*.clj`.
 Reading the hits on real code before landing is the gate that catches what
 the corpus cannot: `(first (filter p xs))` → `(some p xs)` matched ten
 times on defnet and every rewrite would have returned `true` instead of the
-element. It emits `(some (fn [x] (when (p x) x)) xs)` now.
+element. It emits `(some (fn [x] (when (p x) x)) xs)` now. And the file is
+short on purpose: six data rules were splint's under other names
+(`lint/if-else-nil`, `lint/if-not-both`, `style/when-not-call`,
+`style/eq-zero`, `lint/not-empty?`, `style/apply-str-interpose`) and were
+removed once measured; splint is in the estate's `lint:style`, and sift's
+ground is shape, complexity, the host boundary and the graph, not idiom.
 
 **Every finding carries** `:rule`, `:category` (Credo's `:refactor`
 `:readability` `:design` `:warning` `:consistency`), `:instruction`, and an
@@ -114,7 +119,7 @@ nothing should.
 
     clojure -M:test
 
-95 tests, 319 assertions. `sonar-clojure` runs the same files a second time
+95 tests, 316 assertions. `sonar-clojure` runs the same files a second time
 through its own `:test` alias (`-d ../sift/test`): this harness proves the
 library stands alone, that one proves it still fits the consumer.
 

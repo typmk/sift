@@ -170,10 +170,7 @@
         by (into {} (map (juxt :rule identity)) fs)]
     (is (= ids (set (map :rule fs))) "every rule in rules.edn fires")
     (is (= (count ids) (count fs)) "and exactly once")
-    (is (= '(when t x) (:counterpart (by :if-nil-else-is-when))))
-    (is (= '(if-not t x y) (:counterpart (by :if-not-not))))
-    (is (= '(when-not t (println x) x) (:counterpart (by :when-not-not))))
-    (is (= '(clojure.string/join ", " xs) (:counterpart (by :apply-str-interpose-is-join))))
+    (is (= '(some (fn [x] (when (even? x) x)) xs) (:counterpart (by :first-filter-is-some))))
     (is (= '(case k :a 1 :b 2 3) (:counterpart (by :cond-literals-with-else-is-case))))
     (is (nil? (:counterpart (by :thread-sleep))))
     (is (every? shape/applicability (map :applicability fs)))

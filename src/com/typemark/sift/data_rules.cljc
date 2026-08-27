@@ -17,7 +17,7 @@
        (doseq [{:keys [id kind match] :as rule} rules]
          (assert (keyword? id) (str "rule without :id: " (pr-str rule)))
          (assert (contains? #{:rewrite :forbid} kind) (str id " has unknown :kind " kind))
-         (assert (some? match) (str id " has no :match"))
+         (assert (or (some? match) (vector? (:either rule))) (str id " has no :match or :either"))
          (when (= kind :rewrite)
            (assert (contains? rule :emit) (str id " is :rewrite and has no :emit"))))
        `(quote ~rules))))

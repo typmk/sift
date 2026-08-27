@@ -11,7 +11,14 @@
 
   Every code list under a defining form is tried against the rules in
   order and the first match wins, so a rule costs at most one
-  `pattern/match` per form and one form yields one finding. Positions come from the zipper
+  `pattern/match` per form and one form yields one finding.
+
+  Semgrep's three combinators, because a pattern alone cannot say WHERE:
+    :either [P …]   the form matches any of these (in place of :match)
+    :not    [P …]   and none of these
+    :inside P       and some ANCESTOR form matches P — with the same
+                    bindings, so `(deref ?a)` :inside `(swap! ?a ?&_)` is
+                    the atom read inside its own swap. Positions come from the zipper
   node the form was read from; the match itself is over the sexpr."
   (:require [com.typemark.sift.pattern :as pat]
             [com.typemark.sift.zip :refer [collect inside-defn? pos-of sexpr]]
@@ -61,12 +68,27 @@
                                                                (first v) v)]))
                                                 binds))))))
 
+(defn- ancestors-of [zloc]
+  (->> (iterate z/up (z/up zloc)) (take-while some?) (map #(sexpr % ::no)) (remove #{::no})))
+
+(defn- match-rule
+  "Bindings for `form` under `rule`, or nil: :match / :either, then :not,
+  then :inside over the ancestors with the bindings carried through."
+  [{:keys [match either not inside]} form zloc]
+  (when-let [binds (if either
+                     (some #(pat/match % form) either)
+                     (pat/match match form))]
+    (when (not-any? #(pat/match % form) not)
+      (if inside
+        (some (fn [anc] (pat/match inside anc binds)) (ancestors-of zloc))
+        binds))))
+
 (defn- try-rules
   "The FIRST rule that matches wins — one form, one finding. rules.edn is
   ordered specific before general for that reason."
   [file zloc form]
   (some (fn [rule]
-          (when-let [binds (pat/match (:match rule) form)]
+          (when-let [binds (match-rule rule form zloc)]
             (when (guards-ok? rule binds)
               [(finding file zloc rule binds)])))
         rules))
@@ -74,9 +96,12 @@
 (defn findings
   "Every data-rule finding under `zloc`, in document order."
   [file zloc]
+  ;; Any node whose sexpr is a list — a `()` list, but also `@a`, which is
+  ;; a :deref node reading as (clojure.core/deref a). Collecting only
+  ;; z/list? nodes made every deref invisible to every rule.
   (vec (mapcat (fn [c]
                  (when (inside-defn? c)
                    (let [form (sexpr c ::no)]
                      (when (not= ::no form)
                        (try-rules file c form)))))
-               (collect zloc (fn [c] (z/list? c))))))
+               (collect zloc (fn [c] (seq? (sexpr c ::no)))))))

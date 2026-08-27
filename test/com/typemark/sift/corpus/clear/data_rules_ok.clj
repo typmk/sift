@@ -11,3 +11,5 @@
 (defn i [s] (try (Integer/parseInt s) (catch NumberFormatException e (throw (ex-info "bad" {:s s} e)))))
 (defn k [x y] (if x y (or x y)))
 (defn m [k] (cond (= k :a) 1 (= j :b) 2 :else 3))
+(defn n [a b x] (swap! a (fn [v] (conj v (count @b) x))))
+(defn o [a] (let [v @a] (swap! a conj v)))

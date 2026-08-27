@@ -32,6 +32,7 @@
             [com.typemark.sift.interop :as interop]
             [com.typemark.sift.metrics :as metrics]
             [com.typemark.sift.parse :as p]
+            [com.typemark.sift.prose :as prose]
             [com.typemark.sift.regex :as regex]
             [com.typemark.sift.resolve :as resolve]
             [com.typemark.sift.security :as security]
@@ -114,10 +115,14 @@
           (when test? (tests/findings nodes))))
 
 (defn prose-findings
-  "Rules over docstrings and comments, which need clj-kondo's analysis rather
-  than the node stream."
+  "Rules over docstrings, which need clj-kondo's analysis rather than the
+  node stream: the banned-term dictionary, and the shapes generated
+  docstrings have (restates the name, hedges, parameters unnamed,
+  placeholder, namespace undocumented). {filename [finding …]}."
   [analysis-text]
-  (dictionary/findings analysis-text))
+  (merge-with into
+              (dictionary/findings analysis-text)
+              (prose/findings analysis-text)))
 
 (defn interprocedural
   "Taint paths crossing function boundaries. Silent without seeds, by design:

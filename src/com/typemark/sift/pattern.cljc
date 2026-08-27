@@ -4,7 +4,8 @@
 
     ?x        one form, bound; a second ?x must be the SAME form
     ?_        one form, not bound
-    ?&rest    zero or more remaining forms, bound as a seq (tail only)
+    ?&rest    zero or more remaining forms, bound as a seq (tail only);
+              ?&_ is the same tail, unbound
     P ...     zero or more forms each matching P; every ?v inside P binds
               to a vector, one entry per repetition (syntax-rules' ellipsis)
     (?? P Q) ...  a GROUP: each repetition consumes one form per member,
@@ -56,7 +57,9 @@
 
     (rest-sym? (first pats))
     (when (= 1 (count pats))
-      (assoc binds (first pats) (vec forms)))
+      (if (= '?&_ (first pats))
+        binds
+        (assoc binds (first pats) (vec forms))))
 
     (and (second pats) (ellipsis? (second pats)))
     ;; greedy: take as many repetitions as match, then continue with the
@@ -121,9 +124,10 @@
 
 (defn match
   "Bindings {?x form …} when `form` matches `pat`, else nil. An empty map
-  is a match with no variables; nil is no match."
-  [pat form]
-  (match* pat form {}))
+  is a match with no variables; nil is no match. With `binds`, the match
+  must agree with them — a second pattern over the same variables."
+  ([pat form] (match* pat form {}))
+  ([pat form binds] (match* pat form (or binds {}))))
 
 (declare substitute)
 

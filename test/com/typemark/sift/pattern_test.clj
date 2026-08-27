@@ -29,3 +29,7 @@
   (is (= '(when-not x (a) (b)) (p/substitute '(when-not ?t ?&body) '{?t x ?&body [(a) (b)]})))
   (is (= '(case k :a 1 :b 2 3)
          (p/substitute '(case ?x (?? ?k ?e) ... ?d) '{?x k ?k [:a :b] ?e [1 2] ?d 3}))))
+
+(deftest a-second-pattern-must-agree-with-prior-bindings
+  (is (= '{?a a} (p/match '(swap! ?a ?&_) '(swap! a conj 1) '{?a a})))
+  (is (nil? (p/match '(swap! ?a ?&_) '(swap! b conj 1) '{?a a}))))

@@ -18,6 +18,10 @@
 ;; takes the tail, `P ...` repeats, `(?? P Q) ...` repeats a group. A
 ;; symbol without ? is literal.
 ;;
+;; WHERE, not only what — Semgrep's combinators: :either [P …] in place of
+;; :match, :not [P …] to exclude, :inside P for an ancestor that must match
+;; with the SAME bindings.
+;;
 ;; ORDER MATTERS: the first rule that matches a form wins, so a more
 ;; specific pattern goes above the general one it overlaps —
 ;; (if (not ?t) ?a nil) above both (if ?t ?a nil) and (if (not ?t) ?a ?b).
@@ -64,9 +68,25 @@
  ;; the class set and the constant-body test a pattern cannot say. One
  ;; fact, one rule.
 
+ ;; (swap! a (fn [v] (conj v @a))) and (swap! a assoc k (merge (get @a k)
+ ;; …)) — the atom read while its own swap! is being computed. In the fn,
+ ;; v IS the current value and @a is a second, possibly older, read; in the
+ ;; arguments, the read happens before the swap and another writer can land
+ ;; between — a lost update. Measured: one in lume's secrets.clj, the
+ ;; argument form. :inside carries ?a, so a deref of a DIFFERENT atom is not
+ ;; this.
+ {:id :deref-inside-own-swap
+  :kind :forbid
+  :either [(clojure.core/deref ?a) (deref ?a)]
+  :inside (swap! ?a ?&_)
+  :category :warning
+  :applicability :unspecified
+  :message "the atom is read while its own swap! is computed — a lost update"
+  :instruction "Inside (swap! a f), f receives the current value — use it. In the arguments, move the read into f: (swap! a update k merge …). A second @a may be older, and f may run more than once."}
+
  {:id :thread-sleep
   :kind :forbid
-  :match (Thread/sleep ?&args)
+  :either [(Thread/sleep ?&args) (java.lang.Thread/sleep ?&args)]
   :category :design
   :applicability :unspecified
   :message "Thread/sleep blocks a host thread"

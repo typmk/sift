@@ -77,6 +77,31 @@ short on purpose: six data rules were splint's under other names
 removed once measured; splint is in the estate's `lint:style`, and sift's
 ground is shape, complexity, the host boundary and the graph, not idiom.
 
+**Where, not only what — Semgrep's combinators in `rules.edn`.** `:either
+[P …]` in place of `:match`, `:not [P …]` to exclude, `:inside P` for an
+ancestor that must match with the SAME bindings — so `(deref ?a)` `:inside`
+`(swap! ?a ?&_)` is the atom read while its own swap is computed, a lost
+update, and a deref of a different atom is not. Measured: one, in lume's
+`secrets.clj`, the argument form `(swap! a assoc k (merge (get @a k) …))`.
+A reader form is a form: `@a` is a `:deref` node and reads as
+`(clojure.core/deref a)`, and until the engine collected by sexpr rather
+than by `z/list?` no rule could see it.
+
+**Docstrings, judged as Vale judges prose — `prose.cljc`.** Over clj-kondo's
+analysis (`{:analysis {:arglists true}}`), which already carries every
+var's `doc`, `arglist-strs` and span and every namespace's `doc`, so there
+is no parser: `:doc/restates-name` ("Parses the config." on `parse-config`),
+`:doc/hedge` ("this function…", "is used to", "simply"), `:doc/params-unnamed`
+(a short doc for two or more parameters that names none of them, nor any
+piece of one), `:doc/placeholder`, `:doc/ns-missing`. The corpus is
+`corpus/prose/docs.clj` with the analysis kondo emitted beside it. On
+defnet: `restates-name` 7, all real; `hedge` 30; `params-unnamed` 133 —
+measured at 272 before the length guard, every extra one a long docstring
+that explains the design and never says `from-name`, which is not the
+smell. `sift/prose-findings` returns these merged with the banned-term
+dictionary. Vale itself is not driven: its style packs would arrive as an
+`ingest` reader over `vale --output=JSON` if wanted, the sarif bargain.
+
 **Every finding carries** `:rule`, `:category` (Credo's `:refactor`
 `:readability` `:design` `:warning` `:consistency`), `:instruction`, and an
 `:applicability` on clippy's four rungs — `:machine-applicable`,
@@ -119,7 +144,7 @@ nothing should.
 
     clojure -M:test
 
-95 tests, 316 assertions. `sonar-clojure` runs the same files a second time
+99 tests, 328 assertions. `sonar-clojure` runs the same files a second time
 through its own `:test` alias (`-d ../sift/test`): this harness proves the
 library stands alone, that one proves it still fits the consumer.
 

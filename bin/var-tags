@@ -5,16 +5,98 @@
 ;; Same bargain as assay's notes — run it where the project loads, hand
 ;; typeflow the file.
 ;;
-;;   cd <project> && clojure -M path/to/bin/var-tags kondo-analysis.json > var-tags.edn
+;;   cd <project> && clojure -M path/to/bin/var-tags kondo-analysis.json [src-root…] > var-tags.edn
+;;
+;; With source roots it also dumps HOST METHOD RETURNS for every class the
+;; corpus imports or hints — "Simple/.method" -> "int" — where every public
+;; overload of that name agrees on a return type. (.getResponseCode conn)
+;; on a ^HttpURLConnection is an int the compiler knows and a text pass
+;; cannot; measured on lume, that and (.read in buf) were the two boxed
+;; false positives left on a known receiver. Object returns are left out:
+;; "known, unnamed" is what "host" already says.
 ;;
 ;; Reads the namespaces the analysis says are used (namespace-usages :to),
 ;; requires each, and writes {"ns/name" "Tag"} for vars whose var meta or
 ;; whose first arglist carries a :tag — (defn write-str ^String [x] …) tags
 ;; the ARGLIST, and that is where clojure.data.json keeps it: 0 of its vars
 ;; have a var-level :tag, measured.
-(require '[clojure.data.json :as json])
+(require '[clojure.data.json :as json] '[clojure.java.io :as io] '[clojure.string :as str])
+(defn- corpus-classes
+  "Class names the corpus can hint with: every :import, plus every ^Tag
+  token, resolved through the imports and java.lang."
+  [roots]
+  (let [files (for [r roots f (file-seq (io/file r)) :when (re-find #"\.cljc?$" (str f))] f)
+        ns-forms (for [f files
+                       :let [form (try (with-open [rdr (java.io.PushbackReader. (io/reader f))]
+                                         (read {:read-cond :allow :eof nil} rdr))
+                                       (catch Throwable _ nil))]
+                       :when (and (seq? form) (= 'ns (first form)))] form)
+        imports (for [form ns-forms clause (rest form)
+                      :when (and (seq? clause) (= :import (first clause)))
+                      spec (rest clause)
+                      c (cond (symbol? spec) [spec]
+                              (sequential? spec) (map #(symbol (str (first spec) "." %)) (rest spec))
+                              :else [])]
+                  (str c))
+        by-simple (into {} (map (fn [c] [(last (str/split c #"\.")) c]) imports))
+        hinted (for [f files h (re-seq #"\^([A-Za-z][A-Za-z0-9_.]*)" (slurp f))] (second h))
+        ;; Character/digit, Math/abs — a static call names its class
+        statics (for [f files h (re-seq #"[(\s]([A-Z][A-Za-z0-9_]*)/[a-zA-Z]" (slurp f))] (second h))
+        ;; (ProcessBuilder. …) — a constructor names its class too
+        ctors (for [f files h (re-seq #"\(([A-Z][A-Za-z0-9_.]*)\.[\s)]" (slurp f))] (second h))]
+    (->> (concat imports
+                 (for [h (concat hinted statics ctors)] (or (get by-simple h)
+                                     (if (str/includes? h ".") h (str "java.lang." h)))))
+         distinct sort)))
+(defn- returned-classes
+  "The classes public methods of `class-names` return — one level, so
+  (StartAssertionOptions/builder) yields a builder whose own methods are
+  known. Measured on lume: without this the builder was an unnamed class
+  and every setter on it was judged reflective."
+  [class-names]
+  (for [cn class-names
+        :let [c (try (Class/forName cn) (catch Throwable _ nil))]
+        :when c
+        ^java.lang.reflect.Method m (.getMethods ^Class c)
+        :when (java.lang.reflect.Modifier/isPublic (.getModifiers m))
+        :let [r (.getReturnType m)]
+        :when (and (not (.isPrimitive r)) (not (.isArray r)) (not= Object r)
+                   (not (str/starts-with? (.getName r) "java.lang.")))]
+    (.getName r)))
+(defn- ctor-arities
+  "\"Simple/new\" -> {:returns Simple :overloaded #{n…}} — the arities at
+  which a class has more than one public constructor, where an untyped
+  argument reflects. (URL. s) resolves, (ProcessBuilder. x) does not."
+  [class-names]
+  (into {}
+        (for [cn class-names
+              :let [c (try (Class/forName cn) (catch Throwable _ nil))]
+              :when c
+              :let [cs (filter #(java.lang.reflect.Modifier/isPublic (.getModifiers ^java.lang.reflect.Constructor %)) (.getConstructors ^Class c))
+                    overloaded (->> cs (map #(.getParameterCount ^java.lang.reflect.Constructor %)) frequencies (filter #(> (val %) 1)) (map key) set)]
+              :when (seq overloaded)]
+          [(str (.getSimpleName ^Class c) "/new") {:returns (.getSimpleName ^Class c) :overloaded overloaded}])))
+(defn- method-returns [class-names]
+  (into (ctor-arities class-names)
+        (for [cn (distinct (concat class-names (returned-classes class-names)))
+              :let [c (try (Class/forName cn) (catch Throwable _ nil))]
+              :when c
+              [mname ms] (group-by #(.getName ^java.lang.reflect.Method %)
+                                   (filter #(java.lang.reflect.Modifier/isPublic (.getModifiers ^java.lang.reflect.Method %))
+                                           (.getMethods ^Class c)))
+              :let [rets (distinct (map #(.getReturnType ^java.lang.reflect.Method %) ms))
+                    ret (when (= 1 (count rets)) (.getSimpleName ^Class (first rets)))
+                    ;; arities at which more than one overload exists — an
+                    ;; untyped argument there reflects on a known receiver
+                    overloaded (->> ms (map #(.getParameterCount ^java.lang.reflect.Method %))
+                                    frequencies (filter #(> (val %) 1)) (map key) set)]
+              :when (or ret (seq overloaded))]
+          [(str (.getSimpleName ^Class c) "/." mname)
+           (if (seq overloaded) {:returns ret :overloaded overloaded} ret)])))
 (let [a (get (json/read-str (slurp (first *command-line-args*))) "analysis")
-      nses (->> (get a "namespace-usages") (map #(get % "to")) (remove nil?) distinct sort)
+      roots (rest *command-line-args*)
+      ;; clojure.core is never in namespace-usages and pr-str is ^String
+      nses (->> (get a "namespace-usages") (map #(get % "to")) (remove nil?) (cons "clojure.core") distinct sort)
       tags (into (sorted-map)
                  (for [n nses
                        :let [ok (try (require (symbol n)) true (catch Throwable _ false))]
@@ -23,6 +105,10 @@
                        :let [m (meta v)
                              t (or (:tag m) (some-> (:arglists m) first meta :tag))]
                        :when t]
-                   [(str n "/" s) (str (if (class? t) (.getName ^Class t) t))]))]
-  (binding [*out* *err*] (println (count nses) "namespaces," (count tags) "tagged vars"))
-  (prn tags))
+                   [(str n "/" s) (str (if (class? t) (.getName ^Class t) t))]))
+      ;; plus what tagged vars RETURN — io/input-stream is a java.io.InputStream
+      ;; and (.read in buf) is an int only if that class was dumped
+      classes (when (seq roots) (distinct (concat (corpus-classes roots) (filter #(str/includes? % ".") (vals tags)))))
+      returns (method-returns classes)]
+  (binding [*out* *err*] (println (count nses) "namespaces," (count tags) "tagged vars," (count classes) "classes," (count returns) "method returns"))
+  (prn (into tags returns)))

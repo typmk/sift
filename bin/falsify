@@ -10,6 +10,9 @@
 ;;      bin/falsify notes.edn reflection <src-root> <path-needle>
 ;;      … --analysis kondo.json --var-tags var-tags.edn   (return hints through
 ;;      kondo's resolution: the corpus's own ^Tag defns plus bin/var-tags')
+;;      … --loaded loaded.edn   (bin/assay-notes' list of files the compiler
+;;      actually compiled; predictions elsewhere are not judged — a file with
+;;      no note is either clean or never loaded, and notes cannot tell)
 ;;
 ;; <path-needle> keeps only oracle notes whose file contains it (assay
 ;; names a file as the classpath resource; a dependency's notes are in
@@ -22,8 +25,8 @@
 (defn tail2 [p] (str/join "/" (take-last 2 (str/split (str p) #"/"))))
 (let [args (vec *command-line-args*)
       opt (fn [k] (some->> args (drop-while #(not= k %)) second))
-      analysis (opt "--analysis") vt-file (opt "--var-tags")
-      args (->> args (remove #(contains? (set (remove nil? [analysis vt-file "--analysis" "--var-tags"])) %)) vec)
+      analysis (opt "--analysis") vt-file (opt "--var-tags") loaded-file (opt "--loaded")
+      args (->> args (remove #(contains? (set (remove nil? [analysis vt-file loaded-file "--analysis" "--var-tags" "--loaded"])) %)) vec)
       [oracle-file kind root needle & files] args
       _ (when-not (and oracle-file kind root needle) (binding [*out* *err*] (println "usage: falsify notes.edn (boxed-math|reflection) <src-root> <path-needle> [files…]")) (System/exit 2))
       kind (keyword kind)
@@ -38,12 +41,24 @@
       closure-notes (for [[_ k file line col] (re-seq #"(?m)^------ WARNING #\d+ - (\S*) -+\s*\n File: (\S+?):(\d+)(?::(\d+))?" text)]
                       {:file file :line (parse-long line) :col (some-> col parse-long)
                        :kind ({":infer-warning" :uninferred ":undeclared-var" :undeclared} k :closure)})
+      loaded (when loaded-file (set (edn/read-string (slurp loaded-file))))
+      ;; assay names a file as its classpath resource — `ledger.clj` under a
+      ;; `lib/` root, `com/typemark/sift/zip.cljc` under `src/` — and the
+      ;; walker names it as given. Join on the longest suffix either way, and
+      ;; with --loaded keep only oracle notes for files the corpus loaded:
+      ;; assay watches everything the JVM compiles, dependencies included,
+      ;; and 71 of sift's 94 "misses" were rewrite-clj's and data.json's.
+      suffix? (fn [a b] (or (str/ends-with? a b) (str/ends-with? b a)))
+      canon (fn [f] (if loaded (or (some #(when (suffix? (str f) %) %) loaded) (tail2 f)) (tail2 f)))
       oracle (set (for [n (concat assay-notes closure-notes)
                         :when (= kind (:kind n))
-                        :when (str/includes? (:file n) needle)]
-                    [(tail2 (:file n)) (:line n) (:col n)]))
+                        :when (str/includes? (:file n) needle)
+                        :when (or (nil? loaded) (some #(suffix? (:file n) %) loaded))]
+                    [(canon (:file n)) (:line n) (:col n)]))
       host (if (seq closure-notes) :js :jvm)
       all-files (if (seq files) files (map str (fs/glob root "**.{clj,cljc,cljs}")))
+      all-files (if loaded (filter (fn [f] (some #(suffix? (str f) %) loaded)) all-files) all-files)
+      _ (when loaded (println "judging" (count all-files) "files the compiler loaded"))
       resolution (when analysis (resolve/index (slurp analysis)))
       var-tags (merge (when vt-file (edn/read-string (slurp vt-file)))
                       (apply merge (map #(tf/var-tags (slurp %)) all-files)))
@@ -51,7 +66,7 @@
       preds (set (for [f all-files
                        p (tf/predictions (slurp f) f host {:var-tags var-tags :resolution resolution})
                        :when (= kind (:kind p))]
-                   [(tail2 f) (:line p) (:column p)]))
+                   [(canon f) (:line p) (:column p)]))
       tp (count (set/intersection oracle preds))
       p (if (pos? (count preds)) (/ tp (double (count preds))) 0.0)
       r (if (pos? (count oracle)) (/ tp (double (count oracle))) 0.0)]

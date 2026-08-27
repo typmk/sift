@@ -1,0 +1,45 @@
+#!/usr/bin/env clojure -M
+;; The JVM oracle for typeflow, and WHICH FILES IT JUDGED. Requires every
+;; namespace under <src-root> with assay watching, then writes:
+;;
+;;   notes.edn   one #:assay.note{…} per line — the compiler's reflection
+;;               and boxed-math warnings, as data
+;;   loaded.edn  the files whose namespace loaded, as "dir/file.clj" tails
+;;
+;; The second file is the one that was missing. A file with no note is
+;; either clean or never compiled, and the two are indistinguishable from
+;; notes alone — measured on lume, 5 of 21 boxed-math "false positives"
+;; were in test files the oracle had never loaded. bin/falsify --loaded
+;; judges only what the compiler saw.
+;;
+;;   cd <project> && clojure -M path/to/bin/assay-notes src [more roots…]
+;;
+;; A namespace that fails to load is reported on stderr and left out of
+;; loaded.edn; its file is then not judged either way.
+(require 'assay.code '[clojure.java.io :as io] '[clojure.string :as str])
+(let [roots (or (seq *command-line-args*) ["src"])
+      files (for [r roots f (file-seq (io/file r))
+                  :when (and (.isFile ^java.io.File f) (re-find #"\.cljc?$" (str f)))]
+              f)
+      ns-of (fn [^java.io.File f]
+              (try (with-open [rdr (java.io.PushbackReader. (io/reader f))]
+                     (let [form (read {:read-cond :allow :eof nil} rdr)]
+                       (when (and (seq? form) (= 'ns (first form))) (second form))))
+                   (catch Throwable _ nil)))
+      tail2 (fn [f] (str/join "/" (take-last 2 (str/split (str f) #"/"))))]
+  (assay.code/watch!)
+  (let [loaded (doall
+                (for [f files :let [n (ns-of f)] :when n
+                      :let [ok (try (require n) true
+                                    (catch Throwable e
+                                      (binding [*out* *err*] (println "not loaded:" n "-" (.getMessage e)))
+                                      false))]
+                      :when ok]
+                  (tail2 f)))
+        notes (assay.code/watched)]
+    (spit "notes.edn" (with-out-str (run! prn notes)))
+    (spit "loaded.edn" (with-out-str (prn (vec loaded))))
+    (binding [*out* *err*]
+      (println (count files) "files," (count loaded) "loaded," (count notes) "notes"))
+    (shutdown-agents)
+    (System/exit 0)))

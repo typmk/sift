@@ -25,7 +25,7 @@
        :casts {"long" "long" "int" "int" "double" "double" "float" "float"
                "short" "short" "byte" "byte" "char" "char" "boolean" "boolean"}
        :core {"str" "String" "name" "String" "namespace" "String" "subs" "String"
-              "count" "int" "keyword" "Keyword" "symbol" "Symbol"
+              "count" "int" "alength" "int" "keyword" "Keyword" "symbol" "Symbol"
               "vec" :vector "vector" :vector "hash-map" :map "assoc" :map "dissoc" :map
               "fn" "Fn" "fn*" "Fn" "partial" "Fn" "comp" "Fn" "constantly" "Fn"
               "set" :set "list" :list "seq" :seq "first" "Object" "rest" :seq
@@ -39,7 +39,9 @@
               "empty?" "boolean" "seq?" "boolean" "map?" "boolean" "vector?" "boolean"
               "string?" "boolean" "number?" "boolean" "keyword?" "boolean"
               "+" :arith "-" :arith "*" :arith "/" :arith "inc" :arith "dec" :arith
-              "quot" :arith "rem" :arith "mod" :arith "max" :arith "min" :arith
+              ;; mod is a plain defn with no :inline — it never reaches Numbers
+              ;; and never warns (lume abn.clj:15, measured); quot and rem do
+              "quot" :arith "rem" :arith "mod" "Number" "max" :arith "min" :arith "abs" :arith
               "<" "boolean" ">" "boolean" "<=" "boolean" ">=" "boolean" "==" "boolean"
               "zero?" "boolean" "pos?" "boolean" "neg?" "boolean" "even?" "boolean" "odd?" "boolean"
               ;; bit ops: Numbers.and(Object,Object) WARNS when an operand is
@@ -47,6 +49,14 @@
               ;; long — so they are in :math and their tag is "long".
               "bit-and" "long" "bit-or" "long" "bit-xor" "long" "bit-not" "long"
               "bit-shift-left" "long" "bit-shift-right" "long" "unsigned-bit-shift-right" "long"}
+       ;; Numbers is reached only through :inline, and :inline-arities says
+       ;; when: comparisons, max and min at exactly two arguments, the
+       ;; operators at two or more. (<= 200 status 299) is a plain call to
+       ;; clojure.core/<= and the compiler says nothing about it — measured
+       ;; on lume, email.clj:167, a "false positive" that was a wrong model.
+       ;; Absent means any arity.
+       :inline-arities {"mod" #{} "<" #{2} ">" #{2} "<=" #{2} ">=" #{2} "==" #{2} "max" #{2} "min" #{2}
+                        "+" :two-or-more "*" :two-or-more "/" :two-or-more "-" :one-or-more}
        ;; host members whose result the compiler knows to be primitive, so
        ;; math over them is unboxed: (quot (System/currentTimeMillis) 1000)
        ;; was a false positive on lume until this existed. Short list, on

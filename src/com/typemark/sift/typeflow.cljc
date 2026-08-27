@@ -76,6 +76,21 @@
         (when (symbol? s) (str s))))))
 
 (defn- primitive? [host tag] (contains? (get-in hosts [host :primitives]) tag))
+
+(defn- host-branch
+  "`#?(:clj A :cljs B)` -> A for the JVM, B for JS (`:default` either way);
+  nil when the node is not a reader conditional. The catch class in
+  `(catch #?(:clj Exception :cljs :default) e …)` was invisible, so `e` was
+  unknown and every `.getMessage` on it a false reflection."
+  [host zloc]
+  (let [c (peel zloc)]
+    (when (and c (= :reader-macro (z/tag c)))
+      (let [[m body] (children c)]
+        (when (and m (= "?" (z/string m)) body (z/list? body))
+          (let [want (if (= host :js) :cljs :clj)
+                pairs (partition 2 (children body))]
+            (or (some (fn [[k v]] (when (= want (sexpr k ::no)) v)) pairs)
+                (some (fn [[k v]] (when (= :default (sexpr k ::no)) v)) pairs))))))))
 (defn- known? [tag] (some? tag))
 
 (defn- hint-of
@@ -86,7 +101,9 @@
           form (sexpr m ::no)]
       (cond
         (symbol? form) (name form)
-        (keyword? form) (name form)
+        ;; ^js is a tag; ^:private and ^:const are not, and var-tags read
+        ;; "private" as a return class until this said so
+        (keyword? form) (when (= :js form) "js")
         (map? form) (some-> (or (:tag form) (get form 'tag)) str)
         :else nil))))
 
@@ -157,18 +174,117 @@
     (when-let [qn (get (:vars *resolve*) (pos-of c))]
       (get *var-tags* qn))))
 
+(def ^:dynamic *ns-name*
+  "The namespace of the file being walked, so a bare `max-record-bytes`
+  finds its own file's entry in `*var-tags*` without kondo."
+  nil)
+
+(defn- resolved-var [c]
+  (when *resolve* (get (:vars *resolve*) (pos-of c))))
+
+(defn- core-head
+  "`h` when the head is a core fn — unqualified, spelled `clojure.core/` or
+  `cljs.core/`, or resolved there by kondo — else nil. `prometheus/inc` is
+  not `inc`: measured on lume, two boxed-math false positives were a
+  metrics library's `inc` read as arithmetic."
+  [c h]
+  (when h
+    (let [core? #(re-find #"^(clojure|cljs)\.core/" %)
+          qn (resolved-var c)
+          hf (head-full c)]
+      (cond qn (when (core? qn) h)
+            (and hf (str/includes? hf "/") (not (core? hf))) nil
+            :else h))))
+
+(defn- token-var-tag
+  "A bare symbol naming a var with a known tag: `(def ^:const max-bytes 4096)`
+  is inlined by the compiler as the literal, so its uses are `long`."
+  [c nm]
+  (when *var-tags*
+    (or (some->> (resolved-var c) (get *var-tags*))
+        (when *ns-name* (get *var-tags* (str *ns-name* "/" nm)))
+        (when (str/includes? nm "/") (get *var-tags* nm)))))
+
+(defn- simple-name [tag]
+  (when (string? tag) (last (str/split tag #"\."))))
+
+(defn- returns-of
+  "A bin/var-tags entry is a tag string, or {:returns tag :overloaded #{n…}}
+  for a method with several overloads; nil, \"void\" and \"Object\" are
+  known-but-unnamed, which is \"host\"."
+  [entry]
+  (let [r (if (map? entry) (:returns entry) entry)]
+    (cond (nil? r) nil
+          (contains? #{"void" "Object"} r) "host"
+          :else r)))
+
+(defn- overloaded-at?
+  "Does the dumped class have more than one `.m` at `nargs` arguments? Then
+  an argument the compiler cannot type reflects even on a known receiver —
+  lume diplomat.clj:401, (.write writer (sse-event …)) on an
+  OutputStreamWriter: write(String), write(char[]), write(int)."
+  [recv-tag h nargs]
+  (when *var-tags*
+    (let [e (some->> recv-tag simple-name (#(str % "/" h)) (get *var-tags*))]
+      (and (map? e) (contains? (:overloaded e) nargs)))))
+
+(defn- static-return
+  "`Character/digit` -> the dump's \"Character/.digit\" entry, if any."
+  [hf]
+  (when (and *var-tags* hf (str/includes? hf "/") (not (str/includes? hf "/.")))
+    (some-> (get *var-tags* (str/replace hf "/" "/.")) returns-of)))
+
+(defn- agreeing-tag
+  "One tag when every branch carries it, else nil — (if x (.a b) b) on a
+  known b is known; lume webauthn.clj rebinds a builder through if-let and
+  cond three times."
+  [tags]
+  (when (every? known? tags)
+    (let [named (distinct (remove #{"host"} tags))]
+      (cond (empty? named) "host"
+            (= 1 (count named)) (first named)
+            ;; known on every branch, named differently: known, unnamed
+            :else "host"))))
+
+(defn- method-return
+  "`.getResponseCode` on a receiver tagged HttpURLConnection returns `int`,
+  if bin/var-tags dumped that class — keyed \"Simple/.method\". \"host\"
+  (known, unnamed) otherwise, which is what the compiler also knows when it
+  resolved the call: something, but this walker cannot say what."
+  [host env c h]
+  (let [recv (second (children c))]
+    (when (and recv (receiver-known? host env recv))
+      (or (when *var-tags*
+            (some->> (tag-of host env recv) simple-name (#(str % "/" h)) (get *var-tags*) returns-of))
+          "host"))))
+
+(defn- inlined?
+  "Does the compiler reach Numbers for this call at this arity? See
+  hosts.edn :inline-arities."
+  [host h nargs]
+  (let [rule (get-in hosts [host :inline-arities h])]
+    (cond (nil? rule) true
+          (set? rule) (contains? rule nargs)
+          (= :two-or-more rule) (>= nargs 2)
+          (= :one-or-more rule) (>= nargs 1)
+          :else true)))
+
 (defn- tag-of
   "The tag the compiler would carry for this form, or nil."
   [host env zloc]
   (let [c (peel zloc)]
     (or (hint-of zloc)
+        (some->> (host-branch host c) (tag-of host env))
         (literal-tag host c)
         (when (= :token (z/tag c))
           (when-let [nm (token-name c)]
             (or (get env nm)
+                (token-var-tag c nm)
                 ;; Class/FIELD — a static field the compiler resolves:
-                ;; StandardCharsets/UTF_8 as a constructor argument, lume
-                (when (re-find (re-pattern (get-in hosts [host :interop :static])) nm) "host"))))
+                ;; StandardCharsets/UTF_8 as a constructor argument, lume.
+                ;; token-name is the NAME part; the class is in the full symbol
+                (let [full (str (sexpr c ::no))]
+                  (when (re-find (re-pattern (get-in hosts [host :interop :static])) full) "host")))))
         ;; #(…) is a fn
         (when (= :fn (z/tag c)) "Fn")
         (when (or (z/list? c) (= :fn (z/tag c)))
@@ -185,25 +301,43 @@
               ;; agentia: (.digest (MessageDigest/getInstance …)) does not
               ;; reflect; (.getBytes (minify text)) does.
               ;; a host member the table knows returns a primitive or a class
-              (get-in hosts [host :host-returns (head-full c)])
-              (get-in hosts [host :host-returns (head-full c)])
-              (get-in hosts [host :host-returns h])
-              (get-in hosts [host :host-returns h])
+              ;; .indexOf is an int only when the call resolved; on an unknown
+              ;; receiver it reflects and returns Object (agentia ledger.clj:296)
+              (and (or (get-in hosts [host :host-returns (head-full c)])
+                       (get-in hosts [host :host-returns h]))
+                   (or (not (interop-kind host h))
+                       (some->> (second (children c)) (receiver-known? host env))))
+              (or (get-in hosts [host :host-returns (head-full c)])
+                  (get-in hosts [host :host-returns h]))
+              (static-return (head-full c)) (static-return (head-full c))
               (some->> (head-full c) (re-find (re-pattern (get-in hosts [host :interop :static])))) "host"
-              (some->> (head-full c) (re-find (re-pattern (get-in hosts [host :interop :ctor])))) "host"
+              ;; (Foo. …) is a Foo — named, so an overloaded .m on it can be judged
+              (some->> (head-full c) (re-find (re-pattern (get-in hosts [host :interop :ctor]))))
+              (simple-name (subs (head-full c) 0 (dec (count (head-full c)))))
+              (and (= "new" h) (some-> (second (children c)) token-name)) (simple-name (some-> (second (children c)) token-name))
               ;; (doto x …) is x; (-> x (.a) (.b)) on a known x is a chain the
               ;; compiler resolves step by step, so its result is known
               (= "doto" h) (some->> (second (children c)) (tag-of host env))
               (contains? #{"->" ".."} h) (when (some->> (second (children c)) (receiver-known? host env)) "host")
               ;; a var the corpus or the host says returns a class
               (var-return-tag c) (var-return-tag c)
-              (and (interop-kind host h) (some->> (second (children c)) (receiver-known? host env))) "host"
-              (= :arith (get hosts-core h)) (arith-tag host env args)
-              (contains? hosts-core h) (get hosts-core h)
+              (and (interop-kind host h) (method-return host env c h)) (method-return host env c h)
+              (= :arith (get hosts-core (core-head c h))) (arith-tag host env args)
+              (contains? hosts-core (core-head c h)) (get hosts-core h)
               ;; (let [...] body) / (do ... body): the last form's tag
               (contains? #{"let" "let*" "do" "when" "when-not"} h)
               (let [env' (if (contains? #{"let" "let*"} h) (bind-env host env (second (children c))) env)]
                 (some->> (children c) last (tag-of host env')))
+              ;; branches that agree: (if t A B), (if-let [x …] A B), (cond … A … B)
+              (contains? #{"if" "if-not"} h)
+              (let [[_ _ a b] (children c)] (when b (agreeing-tag (map #(tag-of host env %) [a b]))))
+              (contains? #{"if-let" "if-some"} h)
+              (let [[_ bvec a b] (children c)
+                    env' (bind-env host env (peel bvec))]
+                (when b (agreeing-tag [(tag-of host env' a) (tag-of host env b)])))
+              (= "cond" h)
+              (let [exprs (map second (partition 2 (rest (children c))))]
+                (when (seq exprs) (agreeing-tag (map #(tag-of host env %) exprs))))
               :else nil))))))
 
 (defn- bind-env
@@ -265,7 +399,11 @@
                   (nil? c) nil
                   ;; a vector, map or set literal holds code — the first
                   ;; misses were math inside a map literal's values
-                  (contains? #{:vector :map :set} (z/tag c))
+                  ;; @(d/transact conn [[… (+ now ttl)]]) — a :deref is a node
+                  ;; too, and three of agentia's four boxed misses were under one
+                  (and (= :reader-macro (z/tag c)) (host-branch host c))
+                  (walk env (host-branch host c))
+                  (contains? #{:vector :map :set :deref :reader-macro :namespaced-map} (z/tag c))
                   (doseq [k (children c)] (walk env k))
                   (or (z/list? c) (= :fn (z/tag c)))
                   (let [h (head* c)
@@ -281,6 +419,33 @@
                       ;; not its first argument. Measured on lume: every
                       ;; (doto (HikariConfig.) (.setJdbcUrl …)) was a false
                       ;; positive until this.
+                      ;; (cond-> depth branch? inc): a bare math step is a call on
+                      ;; the threaded value — sift parse.cljc:85, the one miss left
+                      (contains? #{"cond->" "cond->>" "some->" "some->>"} h)
+                      (let [target (second kids)
+                            steps (if (str/starts-with? h "cond") (map second (partition 2 (drop 2 kids))) (drop 2 kids))
+                            tests (when (str/starts-with? h "cond") (map first (partition 2 (drop 2 kids))))]
+                        (walk env target)
+                        (doseq [t tests] (walk env t))
+                        (reduce (fn [cur st]
+                                  (let [st (peel st)
+                                        tok (token-name st)
+                                        sh (when (or (z/list? st) (= :fn (z/tag st))) (head* st))]
+                                    (cond
+                                      (and tok (contains? math (core-head st tok)))
+                                      ;; a bare step becomes (inc g) with no meta of its own, so the
+                                      ;; compiler reports the cond-> form's column; a list step keeps its own
+                                      (do (when-not (primitive? host cur) (emit! :boxed-math c {:op tok :tags [cur]}))
+                                          (arith-tag host env []))
+                                      (and sh (contains? math (core-head st sh)))
+                                      (let [tags (cons cur (map #(tag-of host env %) (rest (children st))))]
+                                        (doseq [k (rest (children st))] (walk env k))
+                                        (when-not (every? #(primitive? host %) tags)
+                                          (emit! :boxed-math st {:op sh :tags (vec tags)}))
+                                        (if (every? #(primitive? host %) tags) "long" "Number"))
+                                      :else (do (walk env st) nil))))
+                                (tag-of host env target) steps))
+
                       (contains? #{"doto" "->" "->>" ".."} h)
                       (let [target (second kids)
                             known? (some->> target (receiver-known? host env))
@@ -338,12 +503,13 @@
 
                       (contains? #{"catch"} h)
                       (let [[_ cls b & body] kids
+                            cls (or (host-branch host cls) cls)
                             env' (if-let [nm (token-name b)] (assoc env nm (some-> cls token-name)) env)]
                         (doseq [k body] (walk env' k)))
 
                       :else
                       (do
-                        (when (and h (contains? math h))
+                        (when (and h (contains? math (core-head c h)) (inlined? host h (count (rest kids))))
                           (let [tags (map #(tag-of host env %) (rest kids))]
                             (when-not (every? #(primitive? host %) tags)
                               (emit! :boxed-math c {:op h :tags (vec tags)}))))
@@ -359,17 +525,32 @@
                                               :counterpart (list 'aget (symbol nm) (subs h 2))})))
                         (when-let [ik (interop-kind host h)]
                           (when-let [recv (second kids)]
-                            (when-not (receiver-known? host env recv)
+                            (if-not (receiver-known? host env recv)
                               (emit! (if (= host :js) :uninferred :reflection) c
-                                     {:op h :interop ik :receiver (some-> recv peel z/string)}))))
+                                     {:op h :interop ik :receiver (some-> recv peel z/string)})
+                              ;; known receiver, overloaded method, untyped argument
+                              (let [args (drop 2 kids)
+                                    tags (map #(tag-of host env %) args)]
+                                (when (and (= host :jvm) (= ik :instance-call)
+                                           (overloaded-at? (tag-of host env recv) h (count args))
+                                           (some #(or (nil? %) (= "Number" %)) tags))
+                                  (emit! :reflection c {:op h :interop :overload :receiver (some-> recv peel z/string) :tags (vec tags)}))))))
                         ;; a constructor or static call resolves an OVERLOAD, and
                         ;; an argument the compiler cannot type — Object, or a
                         ;; boxed Number from arithmetic — is a reflective call:
                         ;; (Date. (+ (System/currentTimeMillis) ttl)) and
                         ;; (OutputStreamWriter. stream "UTF-8") on lume, measured
                         (when (and (= host :jvm)
-                                   (let [hf (head-full c)]
-                                     (and hf (contains? (get-in hosts [host :overloaded]) hf))))
+                                   (let [hf (head-full c)
+                                         nargs (count (rest kids))
+                                         dumped (when (and *var-tags* hf (re-find (re-pattern (get-in hosts [host :interop :ctor])) hf))
+                                                  (get *var-tags* (str (simple-name (subs hf 0 (dec (count hf)))) "/new")))]
+                                     (and hf
+                                          (if dumped
+                                            ;; per arity: (URL. s) has one 1-arg ctor and
+                                            ;; resolves; (ProcessBuilder. x) has two — agentia
+                                            (and (map? dumped) (contains? (:overloaded dumped) nargs))
+                                            (contains? (get-in hosts [host :overloaded]) hf)))))
                           (let [tags (map #(tag-of host env %) (rest kids))]
                             (when (some #(or (nil? %) (= "Number" %)) tags)
                               (emit! :reflection c {:op h :interop :overload :tags (vec tags)}))))
@@ -380,21 +561,51 @@
 (defn- defn-forms [zloc]
   (collect zloc (fn [c] (contains? #{"defn" "defn-" "defmethod" "defmacro"} (head-name c)))))
 
+(defn- ns-name-of [zloc]
+  (some->> (when zloc (collect zloc #(= "ns" (head-name %)))) first children second token-name))
+
+(defn- const-def?
+  "(def ^:const x …) — the compiler inlines the value at every use, so the
+  value's literal tag is the var's."
+  [nm]
+  (and (= :meta (z/tag nm))
+       (let [form (sexpr (first (children nm)) ::no)]
+         (or (= :const form) (and (map? form) (:const form))))))
+
+(defn- def-tags
+  "{\"ns/name\" tag} for `def`s whose name carries ^Tag, or ^:const with a
+  numeric, string or boolean literal. lume's trace.clj: (def ^:const
+  max-record-bytes 4096), compared against a count — long against int."
+  [host zloc ns-name]
+  (into {}
+        (for [d (collect zloc #(= "def" (head-name %)))
+              :let [[_ nm init] (children d)]
+              :when (and nm init (token-name nm))
+              :let [t (or (hint-of nm)
+                          (when (const-def? nm)
+                            (let [lt (literal-tag host init)]
+                              (when (string? lt) lt))))]
+              :when t]
+          [(str ns-name "/" (token-name nm)) t])))
+
 (defn var-tags
   "{\"ns/name\" tag} for every defn in `text` whose name or first arglist
   carries a ^Tag — the corpus's own return hints, to merge with
   bin/var-tags' for libraries."
-  [text]
-  (let [zloc (try (z/up (z/of-string text {:track-position? true}))
-                  (catch #?(:clj Exception :cljs :default) _ nil))
-        ns-name (some->> (when zloc (collect zloc #(= "ns" (head-name %)))) first children second token-name)]
-    (into {}
-          (for [d (when zloc (defn-forms zloc))
-                :let [[_ nm & rest] (children d)
-                      argv (first (filter #(z/vector? (peel %)) rest))
-                      t (or (hint-of nm) (some-> argv hint-of))]
-                :when (and ns-name (token-name nm) t)]
-            [(str ns-name "/" (token-name nm)) t]))))
+  ([text] (var-tags text :jvm))
+  ([text host]
+   (let [zloc (try (z/up (z/of-string text {:track-position? true}))
+                   (catch #?(:clj Exception :cljs :default) _ nil))
+         ns-name (ns-name-of zloc)]
+     (if-not (and zloc ns-name)
+       {}
+       (into (def-tags host zloc ns-name)
+             (for [d (defn-forms zloc)
+                   :let [[_ nm & rest] (children d)
+                         argv (first (filter #(z/vector? (peel %)) rest))
+                         t (or (hint-of nm) (some-> argv hint-of))]
+                   :when (and (token-name nm) t)]
+               [(str ns-name "/" (token-name nm)) t]))))))
 
 (defn predictions
   "Source -> [{:kind :line :column :op :tags/:receiver :in \"name\"} …] for
@@ -433,11 +644,12 @@
         zloc (when zloc (z/up zloc))]
     (if-not zloc
       []
-      (-> (vec (for [d (defn-forms zloc)
+      (binding [*ns-name* (ns-name-of zloc)]
+       (-> (vec (for [d (collect zloc (fn [c] (contains? #{"defn" "defn-" "defmethod" "defmacro" "def"} (head-name c))))
                      :let [nm (some-> (children d) second token-name)]
                      p (predictions-in host {} d)]
                  (assoc p :in nm :file path)))
-          (into (reflection-unwarned host zloc path))))))
+          (into (reflection-unwarned host zloc path)))))))
 
 (def rules
   "The two host rules that are tag questions live here beside the compiler

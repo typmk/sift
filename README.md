@@ -151,11 +151,40 @@ from clojure-runtime-book) is the lattice above the host.
 
 | corpus | boxed-math | reflection |
 |---|---|---|
-| sift itself (JVM) | 44 / 45 — P 0.98 R 0.98 | oracle empty (fully hinted) |
-| agentia (JVM) | — | 1 / 1 |
-| lume (JVM, 334 notes), text alone | P 0.87 R 0.98 | P 0.68 R 0.96 |
-| lume, with resolution + var tags | P 0.87 R 0.98 | **P 0.81 R 0.96** |
+| lume (JVM, 335 notes, 91 files), text alone | P 0.87 R 0.98 | P 0.68 R 0.96 |
+| lume, resolution + var tags, 2026-08-27 morning | P 0.87 R 0.98 | P 0.81 R 0.96 |
+| **lume, resolution + var tags + class dump** | **106 / 106 — P 1.00 R 1.00** | **26 / 26 — P 1.00 R 1.00** |
+| sift itself (JVM, 102 notes, 32 files) — held out | **48 / 48** | oracle empty (fully hinted); 0 predicted |
+| agentia `lib/` (JVM, 2 files loaded) — held out | **12 / 12** | 1 / 2 — `(ProcessBuilder. [a-vector])` reflects and the model says it resolves |
 | defnet (JS, Closure) | n/a | **648 predicted, 0 warned — the model was wrong, and JS predicts nothing** |
+
+Lume is IN-SAMPLE: every rule below was learned from a miss there, so its
+1.00 is a fit, not a forecast. Sift and agentia were re-judged from fresh
+notes after the lume work and are the honest number; the four misses they
+still had (`@(d/transact …)` never walked, `.indexOf` read as `int` on a
+receiver that reflected, `cond-> x t inc`, a `.cljc` catch class inside
+`#?(…)`) are fixed and in the test, and the one left is named above.
+
+**What closed lume's 16 boxed and 10 reflection misses, in order of
+yield.** Five were not misses: they were in test files the compiler had
+never compiled. `bin/assay-notes` now writes `loaded.edn` beside
+`notes.edn` and `bin/falsify --loaded` judges only those files — a file
+with no note is either clean or never loaded, and notes alone cannot say
+which. Then the model: only the two-argument comparison is `:inline`, so
+`(<= 200 status 299)` is a plain call and never warns (`:inline-arities`
+in `hosts.edn`; `mod` has no `:inline` at all); `prometheus/inc` is not
+`inc`; `alength` is an `int` and `abs` keeps its operand's primitive; a
+`^:const` def is inlined as its literal; a constructor is its CLASS, not
+"host"; `if-let` and `cond` whose branches agree carry the tag; a static
+field as an argument is known. And the one a text pass cannot take:
+`bin/var-tags <analysis> <src-root>` now also dumps **host method returns
+and per-arity overloads** for every class the corpus imports, hints,
+calls statically or constructs, plus one level of what those return —
+`"HttpURLConnection/.getResponseCode" "int"`,
+`"OutputStreamWriter/.write" {:returns "void" :overloaded #{1 3}}`,
+`"ProcessBuilder/new" {:overloaded #{1}}` — so `(.write w ev)` on a known
+writer with an untyped `ev` is predicted reflective, and `(URL. s)` with
+one 1-arg constructor is not. 5,023 entries for lume, 131 classes.
 
 The step from 0.68 to 0.81 is **return tags on vars**, which a text pass
 cannot see and the compiler reads: the corpus's own `(defn ^Tag f …)` /

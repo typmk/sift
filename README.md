@@ -99,8 +99,18 @@ defnet: `restates-name` 7, all real; `hedge` 30; `params-unnamed` 133 —
 measured at 272 before the length guard, every extra one a long docstring
 that explains the design and never says `from-name`, which is not the
 smell. `sift/prose-findings` returns these merged with the banned-term
-dictionary. Vale itself is not driven: its style packs would arrive as an
-`ingest` reader over `vale --output=JSON` if wanted, the sarif bargain.
+dictionary.
+
+**Vale itself, with no new reader and no new surface.** `bin/sift docs-mirror
+analysis.json out/` writes each source file as `<path>.md` holding only its
+docstrings at their original lines; Vale lints that (`vale/.vale.ini`, styles
+under `vale/styles/Sift` — Hedge, Placeholder, Weasel — or any pack you add);
+`bin/sift vale-sarif vale.json` turns Vale's JSON into SARIF with the `.md`
+stripped, so defnet's existing `ingest op=sarif` attributes every alert to
+the definition by file and line. Measured on defnet: 42 alerts, 42
+attributed, 84 labels (`:vale/Sift.Hedge` + level), zero defnet code
+changed. Vale's `[formats]` mapping refused `.cljs`, which is why the mirror
+carries the suffix.
 
 **Every finding carries** `:rule`, `:category` (Credo's `:refactor`
 `:readability` `:design` `:warning` `:consistency`), `:instruction`, and an
@@ -117,6 +127,8 @@ one zipper vocabulary every rule reads the tree with.
     bin/sift shape --analysis kondo.json src  # resolve through clj-kondo
     bin/sift shape --write-baseline b.edn src # freeze today's findings …
     bin/sift shape --baseline b.edn src       # … and report only new ones
+    bin/sift docs-mirror analysis.json out/   # docstrings as <path>.md, for Vale
+    bin/sift vale-sarif vale.json > vale.sarif # then: defnet ingest op=sarif
 
 A babashka script over the same namespaces, for a lint task or a prompt. defnet's
 `ingest op=scan` is the same rules attached to graph definitions.

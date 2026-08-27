@@ -1,0 +1,12 @@
+extends: existence
+message: "Weasel word: '%s'. Say the number or the condition."
+level: suggestion
+ignorecase: true
+tokens:
+  - various
+  - very
+  - fairly
+  - quite
+  - a number of
+  - some sort of
+  - etc

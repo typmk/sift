@@ -1,0 +1,16 @@
+extends: existence
+message: "Hedge in docstring: '%s'. A docstring is the contract."
+level: warning
+ignorecase: true
+tokens:
+  - this function
+  - this fn
+  - is used to
+  - is responsible for
+  - simply
+  - basically
+  - essentially
+  - in order to
+  - helper function
+  - utility function
+  - as the name suggests

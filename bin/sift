@@ -5,6 +5,13 @@
 ;;
 ;;   sift shape <path>…        place-as-fold, loop-as-map      (was agentia's `places`)
 ;;   sift complexity <path>…   units over the cognitive threshold (default 15)
+;;   sift docs-mirror <kondo-analysis.json> <outdir>
+;;                             each source file rewritten as ONLY its docstrings
+;;                             at their original lines, as <path>.md — for Vale
+;;                             (see vale/.vale.ini): vale's file:line is the
+;;                             source's
+;;   sift vale-sarif <vale.json>   Vale's --output=JSON as SARIF on stdout, for
+;;                             defnet's `ingest op=sarif` — no new reader
 ;;   --edn                     print findings as EDN
 ;;   --threshold N             complexity only
 ;;   --analysis FILE           shape only: clj-kondo analysis JSON, so aliased
@@ -16,7 +23,9 @@
 ;; gate is the caller's — sift never writes.
 (require '[babashka.classpath :as cp] '[babashka.fs :as fs] '[clojure.string :as str])
 (cp/add-classpath (str (fs/parent (fs/parent (fs/real-path *file*))) "/src"))
-(require '[com.typemark.sift.shape :as shape]
+(require '[cheshire.core :as json-out]
+         '[com.typemark.sift.json :as sjson]
+         '[com.typemark.sift.shape :as shape]
          '[com.typemark.sift.resolve :as resolve]
          '[com.typemark.sift.baseline :as baseline]
          '[com.typemark.sift.complexity :as cx])
@@ -34,10 +43,67 @@
   (when instruction (printf "  rewrite: %s\n" instruction))
   (when counterpart (printf "  counterpart (%s):\n    %s\n" (name applicability) (pr-str counterpart))))
 
+(defn- docs-mirror!
+  "kondo analysis JSON -> outdir/<file> holding only docstrings, each at the
+  row kondo gave the var (the doc starts on the line after the name; one
+  line off is inside the definition's span, which is all attribution needs)."
+  [analysis-file outdir]
+  (let [a (get (sjson/read-str (slurp analysis-file)) "analysis")
+        by-file (group-by #(get % "filename")
+                          (concat (get a "var-definitions") (get a "namespace-definitions")))]
+    (doseq [[file defs] by-file
+            :let [docs (->> defs
+                            (keep (fn [d] (when (string? (get d "doc"))
+                                            [(or (get d "name-row") (get d "row") 1) (get d "doc")])))
+                            (sort-by first))]
+            :when (seq docs)
+            :let [out (fs/path outdir (str file ".md"))
+                  lines (reduce (fn [acc [row doc]]
+                                  (let [start (inc row)
+                                        acc (into acc (repeat (max 0 (- start (count acc) 1)) ""))
+                                        acc (conj acc (str "## " (or (some #(when (= row (or (get % "name-row") (get % "row"))) (get % "name")) defs) file)))]
+                                    (into acc (str/split-lines doc))))
+                                [] docs)]]
+      (fs/create-dirs (fs/parent out))
+      (spit (str out) (str (str/join "\n" lines) "\n")))
+    (println (count by-file) "files mirrored to" outdir)))
+
+(defn- vale->sarif
+  "Vale --output=JSON -> SARIF 2.1.0. Rule ids are Vale's Check names
+  (Sift.Hedge); levels map suggestion->note, warning->warning, error->error."
+  [vale-json-file]
+  (let [v (sjson/read-str (slurp vale-json-file))
+        level (fn [s] (case s "error" "error" "warning" "warning" "note"))
+        checks (distinct (for [[_ alerts] v a alerts] (get a "Check")))
+        results (for [[file alerts] v a alerts]
+                  {:ruleId (get a "Check")
+                   :level (level (get a "Severity"))
+                   :message {:text (get a "Message")}
+                   ;; the mirror is <source>.md; the uri is the source, so
+                   ;; defnet's suffix match lands on the graph's file
+                   :locations [{:physicalLocation {:artifactLocation {:uri (str/replace file #"\.md$" "")}
+                                                   :region {:startLine (get a "Line")}}}]})]
+    {:version "2.1.0"
+     :$schema "https://json.schemastore.org/sarif-2.1.0.json"
+     :runs [{:tool {:driver {:name "vale"
+                             :rules (for [c checks] {:id c :defaultConfiguration {:level "warning"}})}}
+             :results (vec results)}]}))
+
 (defn- usage []
   (binding [*out* *err*]
-    (println "usage: sift (shape | complexity) [--edn] [--threshold N] <path> ..."))
+    (println "usage: sift (shape | complexity) [--edn] [--threshold N] <path> ...  |  sift docs-mirror <analysis.json> <outdir>  |  sift vale-sarif <vale.json>"))
   (System/exit 2))
+
+(when (= "docs-mirror" (first *command-line-args*))
+  (let [[_ analysis outdir] *command-line-args*]
+    (when-not (and analysis outdir) (usage))
+    (docs-mirror! analysis outdir)
+    (System/exit 0)))
+(when (= "vale-sarif" (first *command-line-args*))
+  (let [[_ vale-json] *command-line-args*]
+    (when-not vale-json (usage))
+    (println (json-out/generate-string (vale->sarif vale-json)))
+    (System/exit 0)))
 
 (let [args      *command-line-args*
       cmd       (first args)

@@ -1,0 +1,28 @@
+#!/usr/bin/env clojure -M
+;; The host's own answer to "what does this var return": the :tag on every
+;; public var of the namespaces a project uses, dumped as EDN for typeflow's
+;; :var-tags. A text pass cannot see json/write-str's ^String; the JVM can.
+;; Same bargain as assay's notes — run it where the project loads, hand
+;; typeflow the file.
+;;
+;;   cd <project> && clojure -M path/to/bin/var-tags kondo-analysis.json > var-tags.edn
+;;
+;; Reads the namespaces the analysis says are used (namespace-usages :to),
+;; requires each, and writes {"ns/name" "Tag"} for vars whose var meta or
+;; whose first arglist carries a :tag — (defn write-str ^String [x] …) tags
+;; the ARGLIST, and that is where clojure.data.json keeps it: 0 of its vars
+;; have a var-level :tag, measured.
+(require '[clojure.data.json :as json])
+(let [a (get (json/read-str (slurp (first *command-line-args*))) "analysis")
+      nses (->> (get a "namespace-usages") (map #(get % "to")) (remove nil?) distinct sort)
+      tags (into (sorted-map)
+                 (for [n nses
+                       :let [ok (try (require (symbol n)) true (catch Throwable _ false))]
+                       :when ok
+                       [s v] (ns-publics (symbol n))
+                       :let [m (meta v)
+                             t (or (:tag m) (some-> (:arglists m) first meta :tag))]
+                       :when t]
+                   [(str n "/" s) (str (if (class? t) (.getName ^Class t) t))]))]
+  (binding [*out* *err*] (println (count nses) "namespaces," (count tags) "tagged vars"))
+  (prn tags))

@@ -151,16 +151,27 @@ from clojure-runtime-book) is the lattice above the host.
 |---|---|---|
 | sift itself (JVM) | 44 / 45 — P 0.98 R 0.98 | oracle empty (fully hinted) |
 | agentia (JVM) | — | 1 / 1 |
-| lume (JVM, 334 notes) | P 0.87 R 0.98 | P 0.58 R 0.96 |
+| lume (JVM, 334 notes), text alone | P 0.87 R 0.98 | P 0.68 R 0.96 |
+| lume, with resolution + var tags | P 0.87 R 0.98 | **P 0.81 R 0.96** |
 | defnet (JS, Closure) | n/a | **648 predicted, 0 warned — the model was wrong, and JS predicts nothing** |
 
-What the misses are: a bare `inc` inside `cond->` (threading expansion), a
-library fn with a `^String` return hint the compiler reads and a text rule
-cannot (`json/write-str`) — the ceiling without a resolver. Every rule in the
-table above was learned from a false positive or a miss on real code, each
-named in `hosts.edn`. defnet's `ingest op=scan` lands these as
-`:sift/boxed-math` / `:sift/reflection` on definitions; `op=hostwarn` lands
-the compiler's own answer beside them.
+The step from 0.68 to 0.81 is **return tags on vars**, which a text pass
+cannot see and the compiler reads: the corpus's own `(defn ^Tag f …)` /
+`(defn f ^Tag […])` via `sift/var-tags` over its trees, and libraries' via
+`bin/var-tags` on the JVM — `(:tag (meta v))` *or the first arglist's tag*,
+because `clojure.data.json/write-str` keeps its `^String` on the arglist and
+none of its vars carry one. Both join at the call form's position through
+kondo's resolution. clj-kondo itself strips hints (`arglist-strs` gives
+`[s]` for `[^String s]`), which is why the trees are read. Occurrence typing
+(Tobin-Hochstadt & Felleisen, `:narrows` in `hosts.edn`) is in and correct
+and moved lume by one finding — it rarely guards interop with a predicate.
+
+What the misses are: a bare `inc` inside `cond->` (threading expansion),
+and a receiver bound by destructuring. Every rule in `hosts.edn` was learned
+from a false positive or a miss on real code and says which. defnet's
+`ingest op=scan` runs two passes so cross-file return hints count and lands
+these as `:sift/boxed-math` / `:sift/reflection` on definitions;
+`op=hostwarn` lands the compiler's own answer beside them.
 
 **Every finding carries** `:rule`, `:category` (Credo's `:refactor`
 `:readability` `:design` `:warning` `:consistency`), `:instruction`, and an

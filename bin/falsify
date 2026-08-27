@@ -1,11 +1,15 @@
 #!/usr/bin/env bb
-;; typeflow's judge: predictions against assay's notes (the JVM compiler's
-;; own reflection and boxed-math warnings), as precision and recall.
+;; typeflow's judge: predictions against the host compiler's own warnings —
+;; assay's notes (JVM: reflection, boxed-math) or a shadow-cljs build log
+;; (Closure: :infer-warning as :uninferred) — as precision and recall. One
+;; oracle interface: a note is {:file :line :col :kind}, whichever host wrote it.
 ;;
 ;;   1. (require 'assay.code) (assay.code/watch!) (require 'your.ns …)
 ;;      (spit "notes.edn" (with-out-str (run! prn (assay.code/watched))))
 ;;   2. bin/falsify notes.edn boxed-math <src-root> <path-needle> [files…]
 ;;      bin/falsify notes.edn reflection <src-root> <path-needle>
+;;      … --analysis kondo.json --var-tags var-tags.edn   (return hints through
+;;      kondo's resolution: the corpus's own ^Tag defns plus bin/var-tags')
 ;;
 ;; <path-needle> keeps only oracle notes whose file contains it (assay
 ;; names a file as the classpath resource; a dependency's notes are in
@@ -13,19 +17,39 @@
 ;; both sides. Numbers this printed are the ones in the README.
 (require '[babashka.classpath :as cp] '[babashka.fs :as fs])
 (cp/add-classpath (str (fs/parent (fs/parent (fs/real-path *file*))) "/src"))
-(require '[com.typemark.sift.typeflow :as tf] '[clojure.edn :as edn] '[clojure.set :as set] '[clojure.string :as str])
+(require '[com.typemark.sift.typeflow :as tf] '[com.typemark.sift.resolve :as resolve]
+         '[clojure.edn :as edn] '[clojure.set :as set] '[clojure.string :as str])
 (defn tail2 [p] (str/join "/" (take-last 2 (str/split (str p) #"/"))))
-(let [[oracle-file kind root needle & files] *command-line-args*
+(let [args (vec *command-line-args*)
+      opt (fn [k] (some->> args (drop-while #(not= k %)) second))
+      analysis (opt "--analysis") vt-file (opt "--var-tags")
+      args (->> args (remove #(contains? (set (remove nil? [analysis vt-file "--analysis" "--var-tags"])) %)) vec)
+      [oracle-file kind root needle & files] args
       _ (when-not (and oracle-file kind root needle) (binding [*out* *err*] (println "usage: falsify notes.edn (boxed-math|reflection) <src-root> <path-needle> [files…]")) (System/exit 2))
       kind (keyword kind)
-      notes (->> (str/split-lines (slurp oracle-file)) (remove str/blank?) (map edn/read-string))
+      text (slurp oracle-file)
       code->kind {:assay.note/boxed-math :boxed-math :assay.note/reflection :reflection}
-      oracle (set (for [n notes :let [sp (:assay.note/span n)]
-                        :when (= kind (code->kind (:assay.note/code n)))
-                        :when (str/includes? (str (:assay/file sp)) needle)]
-                    [(tail2 (:assay/file sp)) (:assay/line sp) (:assay/col sp)]))
-      preds (set (for [f (if (seq files) files (map str (fs/glob root "**.{clj,cljc}")))
-                       p (tf/predictions (slurp f) f :jvm)
+      ;; assay notes, one EDN map per line …
+      assay-notes (for [l (str/split-lines text) :when (str/starts-with? l "#:assay.note")
+                        :let [n (edn/read-string l) sp (:assay.note/span n)]]
+                    {:file (str (:assay/file sp)) :line (:assay/line sp) :col (:assay/col sp)
+                     :kind (code->kind (:assay.note/code n))})
+      ;; … or Closure's blocks in a shadow-cljs log
+      closure-notes (for [[_ k file line col] (re-seq #"(?m)^------ WARNING #\d+ - (\S*) -+\s*\n File: (\S+?):(\d+)(?::(\d+))?" text)]
+                      {:file file :line (parse-long line) :col (some-> col parse-long)
+                       :kind ({":infer-warning" :uninferred ":undeclared-var" :undeclared} k :closure)})
+      oracle (set (for [n (concat assay-notes closure-notes)
+                        :when (= kind (:kind n))
+                        :when (str/includes? (:file n) needle)]
+                    [(tail2 (:file n)) (:line n) (:col n)]))
+      host (if (seq closure-notes) :js :jvm)
+      all-files (if (seq files) files (map str (fs/glob root "**.{clj,cljc,cljs}")))
+      resolution (when analysis (resolve/index (slurp analysis)))
+      var-tags (merge (when vt-file (edn/read-string (slurp vt-file)))
+                      (apply merge (map #(tf/var-tags (slurp %)) all-files)))
+      _ (when (or analysis vt-file) (println "var-tags" (count var-tags) "resolution files" (count resolution)))
+      preds (set (for [f all-files
+                       p (tf/predictions (slurp f) f host {:var-tags var-tags :resolution resolution})
                        :when (= kind (:kind p))]
                    [(tail2 f) (:line p) (:column p)]))
       tp (count (set/intersection oracle preds))

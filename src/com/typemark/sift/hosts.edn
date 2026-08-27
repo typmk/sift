@@ -27,6 +27,7 @@
        :core {"str" "String" "name" "String" "namespace" "String" "subs" "String"
               "count" "int" "keyword" "Keyword" "symbol" "Symbol"
               "vec" :vector "vector" :vector "hash-map" :map "assoc" :map "dissoc" :map
+              "fn" "Fn" "fn*" "Fn" "partial" "Fn" "comp" "Fn" "constantly" "Fn"
               "set" :set "list" :list "seq" :seq "first" "Object" "rest" :seq
               ;; clojure.java.io carries return hints the compiler reads; keyed
               ;; by name because `head*` is the unqualified name (io/file -> file)
@@ -71,9 +72,21 @@
                      "File." "URI." "URL." "BigDecimal." "BigInteger." "Thread." "Integer." "Long." "Double."
                      "java.util.Date." "java.io.File." "java.net.URI."
                      "URLDecoder/decode" "URLEncoder/encode" "java.net.URLDecoder/decode" "java.net.URLEncoder/encode"
-                     "String/valueOf" "Integer/valueOf" "Long/valueOf" "Double/valueOf" "Integer/parseInt"
-                     "Long/parseLong" "Math/abs" "Math/max" "Math/min" "Math/round"
+                     ;; NOT Integer/parseInt or Long/parseLong: their overloads differ
+                     ;; by ARITY, and arity resolves without types — lume, measured
+                     "String/valueOf" "Integer/valueOf" "Long/valueOf" "Double/valueOf"
+                     "Math/abs" "Math/max" "Math/min" "Math/round"
                      "String/format" "Arrays/asList" "Collections/sort"}
+       ;; occurrence typing (Tobin-Hochstadt & Felleisen 2010): a predicate in
+       ;; test position narrows its argument in the then-branch. Classes, not
+       ;; primitives — (number? x) does not unbox x, so boxed-math is unmoved;
+       ;; reflection on (.length s) after (string? s) is not.
+       :narrows {"string?" "String" "keyword?" "Keyword" "symbol?" "Symbol"
+                 "map?" :map "vector?" :vector "set?" :set "seq?" :seq "coll?" :collection
+                 "fn?" "Fn" "ifn?" "IFn" "char?" "Character" "boolean?" "Boolean"
+                 "number?" "Number" "integer?" "Long" "int?" "Long" "double?" "Double"
+                 "inst?" "java.util.Date" "uuid?" "java.util.UUID" "uri?" "java.net.URI"
+                 "bytes?" "bytes"}
        :math #{"+" "-" "*" "/" "inc" "dec" "quot" "rem" "mod" "max" "min"
                "<" ">" "<=" ">=" "==" "zero?" "pos?" "neg?"
                "bit-and" "bit-or" "bit-xor" "bit-not" "bit-shift-left" "bit-shift-right" "unsigned-bit-shift-right"

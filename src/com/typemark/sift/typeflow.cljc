@@ -121,13 +121,31 @@
               :when (and nm (not= "&" nm))]
           [nm (hint-of p)])))
 
-(declare tag-of bind-env interop-kind receiver-known?)
+(declare tag-of bind-env interop-kind receiver-known? defn-forms predictions*)
 
 (defn- arith-tag [host env args]
   (let [tags (map #(tag-of host env %) args)]
     (if (and (seq tags) (every? #(primitive? host %) tags))
       (if (some #{"double" "float"} tags) "double" "long")
       "Number")))
+
+(def ^:dynamic *var-tags*
+  "{\"ns/name\" tag} — return tags of vars, from `var-tags` over the corpus's
+  own trees and/or bin/var-tags on the JVM for libraries. nil is none."
+  nil)
+
+(def ^:dynamic *resolve*
+  "{:vars {[row col] \"ns/name\"}} for the file being walked, from
+  resolve/for-file, so a call form's head resolves to the var it names."
+  nil)
+
+(defn- var-return-tag
+  "The tag a call to a user or library var returns, if kondo resolved the
+  call and the var carries one. The one step a text pass cannot take alone."
+  [c]
+  (when (and *var-tags* *resolve*)
+    (when-let [qn (get (:vars *resolve*) (pos-of c))]
+      (get *var-tags* qn))))
 
 (defn- tag-of
   "The tag the compiler would carry for this form, or nil."
@@ -137,7 +155,12 @@
         (literal-tag host c)
         (when (= :token (z/tag c))
           (when-let [nm (token-name c)]
-            (get env nm)))
+            (or (get env nm)
+                ;; Class/FIELD — a static field the compiler resolves:
+                ;; StandardCharsets/UTF_8 as a constructor argument, lume
+                (when (re-find (re-pattern (get-in hosts [host :interop :static])) nm) "host"))))
+        ;; #(…) is a fn
+        (when (= :fn (z/tag c)) "Fn")
         (when (or (z/list? c) (= :fn (z/tag c)))
           (let [h (head* c)
                 hosts-core (get-in hosts [host :core])
@@ -158,8 +181,12 @@
               (get-in hosts [host :host-returns h])
               (some->> (head-full c) (re-find (re-pattern (get-in hosts [host :interop :static])))) "host"
               (some->> (head-full c) (re-find (re-pattern (get-in hosts [host :interop :ctor])))) "host"
-              ;; (doto x …) is x
+              ;; (doto x …) is x; (-> x (.a) (.b)) on a known x is a chain the
+              ;; compiler resolves step by step, so its result is known
               (= "doto" h) (some->> (second (children c)) (tag-of host env))
+              (contains? #{"->" ".."} h) (when (some->> (second (children c)) (receiver-known? host env)) "host")
+              ;; a var the corpus or the host says returns a class
+              (var-return-tag c) (var-return-tag c)
               (and (interop-kind host h) (some->> (second (children c)) (receiver-known? host env))) "host"
               (= :arith (get hosts-core h)) (arith-tag host env args)
               (contains? hosts-core h) (get hosts-core h)
@@ -235,7 +262,7 @@
                         kids (children c)]
                     (cond
                       (contains? #{"let" "let*" "loop" "doseq" "for" "dotimes" "with-open"
-                                   "if-let" "when-let" "if-some" "when-some" "when-first"} h)
+                                   "if-some" "when-some" "when-first"} h)
                       (let [env' (or (walk-binds env (second kids)) env)]
                         (doseq [k (drop 2 kids)] (walk env' k)))
 
@@ -264,6 +291,40 @@
                       (let [argv (first (filter #(z/vector? (peel %)) kids))
                             env' (if argv (merge env (param-env (peel argv))) env)]
                         (doseq [k kids :when (not= k argv)] (walk env' k)))
+
+                      ;; occurrence typing: (if (string? s) THEN ELSE) — s is a
+                      ;; String in THEN; (instance? C x) likewise; (and (string? s) …)
+                      ;; narrows for the rest of the and. hosts.edn :narrows.
+                      (contains? #{"if" "when" "if-let" "when-let" "and" "cond"} h)
+                      (let [narrow (fn [env test]
+                                     (let [t (peel test)]
+                                       (if (and t (z/list? t))
+                                         (let [th (head* t) [_ a b] (children t)]
+                                           (cond
+                                             (and (= "instance?" th) a b (token-name b) (token-name a))
+                                             (assoc env (token-name b) (token-name a))
+                                             (and a (token-name a) (get-in hosts [host :narrows th]))
+                                             (assoc env (token-name a) (get-in hosts [host :narrows th]))
+                                             :else env))
+                                         env)))]
+                        (case h
+                          ("if" "when")
+                          (let [[_ test & body] kids]
+                            (walk env test)
+                            (let [env' (narrow env test)]
+                              (walk env' (first body))
+                              (doseq [k (rest body)] (walk (if (= h "when") env' env) k))))
+                          "and"
+                          (reduce (fn [e k] (walk e k) (narrow e k)) env (rest kids))
+                          "cond"
+                          (loop [e env pairs (partition-all 2 (rest kids))]
+                            (when-let [[test expr] (first pairs)]
+                              (walk e test)
+                              (when expr (walk (narrow e test) expr))
+                              (recur e (rest pairs))))
+                          ;; if-let / when-let: binding, then the body under the binding
+                          (let [env' (or (walk-binds env (second kids)) env)]
+                            (doseq [k (drop 2 kids)] (walk env' k)))))
 
                       (contains? #{"catch"} h)
                       (let [[_ cls b & body] kids
@@ -299,25 +360,52 @@
 (defn- defn-forms [zloc]
   (collect zloc (fn [c] (contains? #{"defn" "defn-" "defmethod" "defmacro"} (head-name c)))))
 
+(defn var-tags
+  "{\"ns/name\" tag} for every defn in `text` whose name or first arglist
+  carries a ^Tag — the corpus's own return hints, to merge with
+  bin/var-tags' for libraries."
+  [text]
+  (let [zloc (try (z/up (z/of-string text {:track-position? true}))
+                  (catch #?(:clj Exception :cljs :default) _ nil))
+        ns-name (some->> (when zloc (collect zloc #(= "ns" (head-name %)))) first children second token-name)]
+    (into {}
+          (for [d (when zloc (defn-forms zloc))
+                :let [[_ nm & rest] (children d)
+                      argv (first (filter #(z/vector? (peel %)) rest))
+                      t (or (hint-of nm) (some-> argv hint-of))]
+                :when (and ns-name (token-name nm) t)]
+            [(str ns-name "/" (token-name nm)) t]))))
+
 (defn predictions
   "Source -> [{:kind :line :column :op :tags/:receiver :in \"name\"} …] for
-  the host `path` compiles for."
+  the host `path` compiles for. `opts`: {:var-tags {} :resolution idx} —
+  see `*var-tags*` and `*resolve*`."
   ([text path] (predictions text path (host-of path)))
-  ([text path host]
-   (let [zloc (try (z/of-string text {:track-position? true})
-                   (catch #?(:clj Exception :cljs :default) _ nil))
-         zloc (when zloc (z/up zloc))]
-     (if-not zloc
-       []
-       (vec (for [d (defn-forms zloc)
-                  :let [nm (some-> (children d) second token-name)]
-                  p (predictions-in host {} d)]
-              (assoc p :in nm :file path)))))))
+  ([text path host] (predictions text path host nil))
+  ([text path host {:keys [var-tags resolution]}]
+   (binding [*var-tags* var-tags
+             *resolve* (when resolution
+                         (some (fn [[k v]] (when (or (str/ends-with? (str path) k) (str/ends-with? k (str path))) v)) resolution))]
+     (predictions* text path host))))
+
+(defn- predictions*
+  [text path host]
+  (let [zloc (try (z/of-string text {:track-position? true})
+                  (catch #?(:clj Exception :cljs :default) _ nil))
+        zloc (when zloc (z/up zloc))]
+    (if-not zloc
+      []
+      (vec (for [d (defn-forms zloc)
+                 :let [nm (some-> (children d) second token-name)]
+                 p (predictions-in host {} d)]
+             (assoc p :in nm :file path))))))
 
 (defn findings
-  "Predictions as findings, one rule per kind under :typeflow/."
-  [text path]
-  (for [{:keys [kind line column op tags receiver in]} (predictions text path)]
+  "Predictions as findings, one rule per kind under :typeflow/. `opts` as
+  for `predictions`: {:var-tags {} :resolution idx}."
+  ([text path] (findings text path nil))
+  ([text path opts]
+  (for [{:keys [kind line column op tags receiver in]} (predictions text path (host-of path) opts)]
     {:rule (keyword "typeflow" (name kind))
      :line line :column column
      :symbol (some-> in symbol)
@@ -325,4 +413,4 @@
                 :boxed-math (str op " over " (str/join ", " (map #(or % "Object") tags)) " boxes; hint or cast the operands")
                 :reflection (str op " on " receiver " reflects; its tag is not known here")
                 :uninferred (str op " on " receiver ": Closure cannot infer the target; hint ^js or use a js/ global"))
-     :applicability :unspecified}))
+     :applicability :unspecified})))

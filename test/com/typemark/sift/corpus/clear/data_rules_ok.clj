@@ -1,0 +1,13 @@
+(ns data-rules-ok)
+
+(defn a [t x] (when t x))
+(defn b [t x y] (if-not t x y))
+(defn c [t x] (when-not t (println x) x))
+(defn d [xs] (empty? xs))
+(defn e [xs] (seq xs))
+(defn f [xs] (clojure.string/join ", " xs))
+(defn g [xs] (some even? xs))
+(defn h [k] (case k :a 1 :b 2 3))
+(defn i [s] (try (Integer/parseInt s) (catch NumberFormatException e (throw (ex-info "bad" {:s s} e)))))
+(defn k [x y] (if x y (or x y)))
+(defn m [k] (cond (= k :a) 1 (= j :b) 2 :else 3))

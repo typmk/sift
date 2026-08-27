@@ -51,6 +51,27 @@ that log. On first contact `js-prop-on-own-object` found a `(set! (.-k props)
 …)` on a `#js` literal in defnet's viewer — the `:advanced` rename trap it
 had already shipped once.
 
+**Rules as data — `rules.edn`.** Vale's shape: a few rule KINDS, each
+configured by data, rather than one language expected to say everything.
+`:rewrite` is a `:match` pattern and an `:emit` template; `:forbid` is a
+pattern and a message. Patterns are `pattern.cljc`'s — the vocabulary
+defnet's `edit op=pattern` already speaks: `?x` binds and unifies, `?_`
+ignores, `?&rest` takes the tail, `P ...` repeats, `(?? P Q) ...` repeats a
+group — so `(cond (?? (= ?x ?k) ?e) ... :else ?d)` walks the pairs and
+`(case ?x (?? ?k ?e) ... ?d)` writes them back. `:when` names guards. The
+file is inlined at compile time by a macro, so it is one file on the JVM,
+under babashka and in ClojureScript, and a rule that does not parse fails
+the build. First match wins per form; order the file specific to general.
+A rule that needs the zipper, positions across forms or a count stays a
+coded rule and is registered beside these — the format does not decide what
+is a rule, the corpus does, and every data rule has its flag and clear
+lines in `corpus/{flag,clear}/data_rules*.clj`.
+
+Reading the hits on real code before landing is the gate that catches what
+the corpus cannot: `(first (filter p xs))` → `(some p xs)` matched ten
+times on defnet and every rewrite would have returned `true` instead of the
+element. It emits `(some (fn [x] (when (p x) x)) xs)` now.
+
 **Every finding carries** `:rule`, `:category` (Credo's `:refactor`
 `:readability` `:design` `:warning` `:consistency`), `:instruction`, and an
 `:applicability` on clippy's four rungs — `:machine-applicable`,
@@ -93,7 +114,7 @@ nothing should.
 
     clojure -M:test
 
-90 tests, 288 assertions. `sonar-clojure` runs the same files a second time
+95 tests, 319 assertions. `sonar-clojure` runs the same files a second time
 through its own `:test` alias (`-d ../sift/test`): this harness proves the
 library stands alone, that one proves it still fits the consumer.
 

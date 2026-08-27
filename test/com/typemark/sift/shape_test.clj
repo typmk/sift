@@ -6,6 +6,7 @@
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
+            [com.typemark.sift.data :as data]
             [com.typemark.sift.resolve :as resolve]
             [com.typemark.sift.shape :as shape]))
 
@@ -28,8 +29,8 @@
         b (lint (at "flag/generated.clj"))]
     (is (empty? a) "house style is silent")
     (is (seq b) "agent shape is not")
-    (is (every? #(= :place-as-fold (:rule %)) b))
-    (is (>= (count b) 2) "summarise's result and describe's out/total")))
+    (is (>= (count (filter #(= :place-as-fold (:rule %)) b)) 2)
+        "summarise's result and describe's out/total")))
 
 (deftest flag-dir
   (doseq [f (corpus "flag")]
@@ -160,3 +161,23 @@
 (deftest host-clear-files-are-silent
   (is (empty? (lint (at "clear/host_ok.clj"))))
   (is (empty? (lint (at "clear/host_js_ok.cljs")))))
+
+;; ---- rules as data ----------------------------------------------------------
+
+(deftest every-data-rule-fires-once-on-its-flag-line-and-never-on-clear
+  (let [ids (set (map :id data/rules))
+        fs (filter #(ids (:rule %)) (lint (at "flag/data_rules.clj")))
+        by (into {} (map (juxt :rule identity)) fs)]
+    (is (= ids (set (map :rule fs))) "every rule in rules.edn fires")
+    (is (= (count ids) (count fs)) "and exactly once")
+    (is (= '(when t x) (:counterpart (by :if-nil-else-is-when))))
+    (is (= '(if-not t x y) (:counterpart (by :if-not-not))))
+    (is (= '(when-not t (println x) x) (:counterpart (by :when-not-not))))
+    (is (= '(clojure.string/join ", " xs) (:counterpart (by :apply-str-interpose-is-join))))
+    (is (= '(case k :a 1 :b 2 3) (:counterpart (by :cond-literals-with-else-is-case))))
+    (is (nil? (:counterpart (by :thread-sleep))))
+    (is (every? shape/applicability (map :applicability fs)))
+    (is (every? (comp string? :instruction) fs))
+    (is (every? shape/rules (map :rule fs)) "data rules are in the registry"))
+  (is (empty? (filter #(contains? (set (map :id data/rules)) (:rule %))
+                      (lint (at "clear/data_rules_ok.clj"))))))

@@ -1,0 +1,127 @@
+;; sift's data rules — read by com.typemark.sift.data at load time.
+;;
+;; Vale's idea: a few rule KINDS, each configured by data. Two so far.
+;;
+;;   :rewrite   {:match pattern :emit template}  — a form that says by hand
+;;              what a core form says by name; the counterpart is the
+;;              template instantiated from the match.
+;;   :forbid    {:match pattern}                 — a form that should not
+;;              appear; no counterpart, or a fixed one.
+;;
+;; Every rule: :id (keyword), :kind, :category (Credo's :refactor
+;; :readability :design :warning :consistency), :applicability (clippy's
+;; :machine-applicable :maybe-incorrect :has-placeholders :unspecified),
+;; :message, :instruction. Optional :when {?v pred} where pred is a keyword
+;; naming a guard in com.typemark.sift.data/guards, or a set of literals.
+;;
+;; Patterns are com.typemark.sift.pattern's: ?x binds, ?_ ignores, ?&rest
+;; takes the tail, `P ...` repeats, `(?? P Q) ...` repeats a group. A
+;; symbol without ? is literal.
+;;
+;; ORDER MATTERS: the first rule that matches a form wins, so a more
+;; specific pattern goes above the general one it overlaps —
+;; (if (not ?t) ?a nil) above both (if ?t ?a nil) and (if (not ?t) ?a ?b).
+;;
+;; THE GATE IS UNCHANGED BY THE FORMAT: a rule enters with a flag file
+;; that fires and a clear file that stays silent
+;; (test/…/corpus/{flag,clear}/data_rules*.clj), and every hit on real code
+;; is read before it lands. Being data makes a rule cheap to write, not
+;; cheap to trust.
+
+[{:id :if-not-nil-else-is-when-not
+  :kind :rewrite
+  :match (if (not ?t) ?a nil)
+  :emit (when-not ?t ?a)
+  :category :readability
+  :applicability :machine-applicable
+  :message "if over a negated test with a nil else is when-not"
+  :instruction "Use when-not; drop the not and the trailing nil."}
+
+ {:id :if-nil-else-is-when
+  :kind :rewrite
+  :match (if ?t ?a nil)
+  :emit (when ?t ?a)
+  :category :readability
+  :applicability :machine-applicable
+  :message "if with a nil else is when"
+  :instruction "Use when for a one-armed conditional; drop the trailing nil."}
+
+ {:id :if-not-not
+  :kind :rewrite
+  :match (if (not ?t) ?a ?b)
+  :emit (if-not ?t ?a ?b)
+  :category :readability
+  :applicability :machine-applicable
+  :message "if over a negated test is if-not"
+  :instruction "Use if-not and drop the not."}
+
+ {:id :when-not-not
+  :kind :rewrite
+  :match (when (not ?t) ?&body)
+  :emit (when-not ?t ?&body)
+  :category :readability
+  :applicability :machine-applicable
+  :message "when over a negated test is when-not"
+  :instruction "Use when-not and drop the not."}
+
+ {:id :count-zero-is-empty
+  :kind :rewrite
+  :match (= (count ?x) 0)
+  :emit (empty? ?x)
+  :category :readability
+  :applicability :machine-applicable
+  :message "(= (count x) 0) is (empty? x), and does not walk a seq to count it"
+  :instruction "Use empty?; count realises a lazy seq to the end."}
+
+ {:id :not-empty-is-seq
+  :kind :rewrite
+  :match (not (empty? ?x))
+  :emit (seq ?x)
+  :category :readability
+  :applicability :maybe-incorrect
+  :message "(not (empty? x)) is (seq x) — truthy either way, but seq returns the seq"
+  :instruction "Use seq; the value is the seq rather than true, which matters only where a boolean is stored."}
+
+ {:id :apply-str-interpose-is-join
+  :kind :rewrite
+  :match (apply str (interpose ?sep ?xs))
+  :emit (clojure.string/join ?sep ?xs)
+  :category :readability
+  :applicability :machine-applicable
+  :message "apply str over interpose is clojure.string/join"
+  :instruction "Use clojure.string/join."}
+
+ ;; NOT (some ?p ?xs): some returns what p returned, not the element.
+ ;; Measured on defnet — all ten hits were (first (filter #(= id (:id %))
+ ;; xs)), and the shorter rewrite would have returned true. maybe-incorrect
+ ;; because a nil or false element is found by first and skipped by some.
+ {:id :first-filter-is-some
+  :kind :rewrite
+  :match (first (filter ?p ?xs))
+  :emit (some (fn [x] (when (?p x) x)) ?xs)
+  :category :refactor
+  :applicability :maybe-incorrect
+  :message "(first (filter p xs)) walks no further than some does, and some says so"
+  :instruction "Use (some (fn [x] (when (p x) x)) xs); a nil or false element is the one case first finds and some does not."}
+
+ {:id :cond-literals-with-else-is-case
+  :kind :rewrite
+  :match (cond (?? (= ?x ?k) ?e) ... :else ?d)
+  :when {?x :all-equal ?k :each-case-key ?e :at-least-2}
+  :emit (case ?x (?? ?k ?e) ... ?d)
+  :category :readability
+  :applicability :machine-applicable
+  :message "cond over literals of one value is case"
+  :instruction "Use case; keep the clause bodies, drop the (= x …) tests."}
+
+ ;; No catch-all rule here: host.cljc's :catch-all-swallow covers it with
+ ;; the class set and the constant-body test a pattern cannot say. One
+ ;; fact, one rule.
+
+ {:id :thread-sleep
+  :kind :forbid
+  :match (Thread/sleep ?&args)
+  :category :design
+  :applicability :unspecified
+  :message "Thread/sleep blocks a host thread"
+  :instruction "Schedule with a timer, a core.async timeout, or an executor; a blocked thread is a held resource."}]

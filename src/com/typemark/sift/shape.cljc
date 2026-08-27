@@ -18,6 +18,7 @@
 
   `^:places/allow` on the binding peels a finding, as it did."
   (:require [com.typemark.sift.cond-case :as cond-case]
+            [com.typemark.sift.data :as data]
             [com.typemark.sift.fold :as fold]
             [com.typemark.sift.host :as host]
             [com.typemark.sift.loop-fold :as loop-fold]
@@ -31,6 +32,7 @@
   :refactor :readability :design :warning :consistency) and the instruction
   an agent is handed. A registry, not a set, so this is where a rule's
   metadata lives and a rule file is only its matcher and counterpart."
+  (merge
   {fold/rule      {:category :refactor :instruction fold/instruction}
    map-loop/rule  {:category :refactor :instruction map-loop/instruction}
    loop-fold/rule {:category :refactor :instruction loop-fold/instruction}
@@ -39,7 +41,9 @@
    :catch-all-swallow     (:catch-all-swallow host/rules)
    :mutable-escape        (:mutable-escape host/rules)
    :js-prop-on-own-object (:js-prop-on-own-object host/rules)
-   :reflection-unwarned   (:reflection-unwarned host/rules)})
+   :reflection-unwarned   (:reflection-unwarned host/rules)}
+  ;; rules.edn — each carries its own category and instruction
+  (into {} (map (fn [{:keys [id category instruction]}] [id {:category category :instruction instruction}])) data/rules)))
 
 (def applicability
   "clippy's four rungs, so an editor knows what it may apply unasked:
@@ -64,7 +68,8 @@
                   (into maps)
                   (into (loop-fold/findings file zloc taken))
                   (into (cond-case/findings file zloc))
-                  (into (host/findings file zloc)))))
+                  (into (host/findings file zloc))
+                  (into (data/findings file zloc)))))
       [])))
 
 (defn findings

@@ -9,6 +9,8 @@
 ;;   --threshold N             complexity only
 ;;   --analysis FILE           shape only: clj-kondo analysis JSON, so aliased
 ;;                             core vars resolve and shadowed ones do not
+;;   --baseline FILE           report only findings NOT in FILE (detekt's ratchet)
+;;   --write-baseline FILE     write the current findings as the baseline and exit 0
 ;;
 ;; Exit 1 when anything is reported, 0 when clean, 2 on usage. Reports; the
 ;; gate is the caller's — sift never writes.
@@ -16,6 +18,7 @@
 (cp/add-classpath (str (fs/parent (fs/parent (fs/real-path *file*))) "/src"))
 (require '[com.typemark.sift.shape :as shape]
          '[com.typemark.sift.resolve :as resolve]
+         '[com.typemark.sift.baseline :as baseline]
          '[com.typemark.sift.complexity :as cx])
 
 (defn- clj-file? [p] (contains? #{"clj" "cljs" "cljc"} (fs/extension p)))
@@ -43,10 +46,14 @@
       threshold (some->> rest-args (drop-while #(not= "--threshold" %)) second parse-long)
       analysis  (some->> rest-args (drop-while #(not= "--analysis" %)) second)
       resolution (when analysis (resolve/index (slurp analysis)))
+      base-file (some->> rest-args (drop-while #(not= "--baseline" %)) second)
+      write-base (some->> rest-args (drop-while #(not= "--write-baseline" %)) second)
       paths     (->> rest-args
                      (remove #(str/starts-with? % "--"))
                      (remove #(and threshold (= % (str threshold))))
                      (remove #(and analysis (= % analysis)))
+                     (remove #(and base-file (= % base-file)))
+                     (remove #(and write-base (= % write-base)))
                      vec)
       run       (case cmd
                   "shape"      (fn [file] (shape/findings (slurp file) file resolution))
@@ -54,7 +61,18 @@
                                                (cx/findings (slurp file) file (or threshold cx/default-threshold))))
                   (usage))]
   (when (empty? paths) (usage))
-  (let [fs (vec (mapcat (fn [p] (run (str (fs/absolutize p)))) (mapcat expand paths)))]
+  (let [;; Relative to the cwd, so a baseline is the same file on every machine.
+        rel (fn [f] (str (fs/relativize (fs/cwd) f)))
+        fs (vec (mapcat (fn [p] (map #(assoc % :file (rel (:file %)))
+                                     (run (str (fs/absolutize p)))))
+                        (mapcat expand paths)))
+        fs (if base-file
+             (baseline/new-findings (baseline/parse (slurp base-file)) fs)
+             fs)]
+    (when write-base
+      (spit write-base (baseline/render (baseline/counts fs)))
+      (println (count fs) "findings written to" write-base)
+      (System/exit 0))
     (if edn?
       (prn fs)
       (if (seq fs) (run! print-finding fs) (println "no findings")))

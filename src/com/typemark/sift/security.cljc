@@ -87,7 +87,11 @@
                                      (not= lst (second args))))
                         lst))]
          :when (and nm v (re-find credential-name (:text nm))
-                    (> (count (:text v)) 6))]
+                    (> (count (:text v)) 6)
+                    ;; `ceremony-secret-type` names a KIND of secret, not one:
+                    ;; four of four hits on lume, every value a slug. The name
+                    ;; decides, not the value — "sk-live-abcdef" is kebab too.
+                    (not (re-find #"(?i)[-_](type|kind|name|id|header|field|param|path|env|key-name)$" (:text nm))))]
      (finding "hardcoded-credential" v
               (str "credential-shaped name '" (:text nm) "' is bound to a literal")))
 
@@ -95,10 +99,16 @@
      (finding "xml-external-entity" l
               "confirm this parser has external entity resolution disabled"))
 
+   ;; Only as the ARGUMENT of a call that sets a mode. \"401\" and \"403\" as
+   ;; map keys in an OpenAPI response table read as modes 401 and 403 —
+   ;; four of four hits on lume — and a status code is not a permission.
    (for [n nodes
          :when (and (= :string (:type n)) (not (:commented? n)))
          :let [s (tree/unquote-string n)]
-         :when (world-accessible? s)]
+         :when (world-accessible? s)
+         :let [p (tree/parent nodes n)]
+         :when (and p (contains? tree/call-tags (:tag p))
+                    (re-find #"(?i)chmod|perm|mode|umask|^sh$|shell|exec|mkdir|create|open|write" (or (:head p) "")))]
      (finding "permissive-file-permissions" n
               (str "mode " s " grants access to others")))))
 

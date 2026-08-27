@@ -66,7 +66,15 @@
 
 ;; ── measures ───────────────────────────────────────────────────────────────
 
-(defn measures  "Size and complexity."                   [nodes] (metrics/from-nodes nodes))
+(defn measures
+  "Size and complexity. Given source TEXT, complexity and cognitive come from
+  the unit engine (complexity.cljc) summed over the file; given a node
+  stream — the shape sonar-clojure's sensor still passes — the node count,
+  which is the older, coarser score."
+  [text-or-nodes]
+  (if (string? text-or-nodes)
+    (metrics/measures text-or-nodes)
+    (metrics/from-nodes text-or-nodes)))
 (defn line-data "Per-line measures."             [nodes truth]   (metrics/line-data nodes truth))
 (defn unit-complexity
   "Per-UNIT cognitive and cyclomatic complexity, max nesting and parameter

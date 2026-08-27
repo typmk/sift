@@ -21,10 +21,18 @@
     "dissoc!" "disj!" "persistent!" "future" "sh" "execute!" "insert!" "delete!"
     "http/post" "http/get" "printf" "flush"})
 
-(defn- effectful-call-inside? [nodes form]
-  (some #(and (= :list (:tag %))
-              (contains? effectful (:head %)))
-        (tree/children-of nodes form)))
+(defn- effectful-call-inside?
+  "A `reset!` or `deliver` on an atom or promise the enclosing `let` made is
+  idempotent under retry — the CAS-with-a-decision idiom, lume's
+  idempotency.clj: (let [decision (atom nil)] (swap! state (fn [m] … (reset!
+  decision [:fresh]) …))). A retry resets the same local to the same value."
+  [nodes form]
+  (let [locals (tree/let-bound-locals nodes #{"atom" "promise" "volatile!"})]
+    (some #(and (= :list (:tag %))
+                (contains? effectful (:head %))
+                (not (and (contains? #{"reset!" "swap!" "deliver" "vreset!" "vswap!"} (:head %))
+                          (contains? locals (:text (tree/first-argument nodes %))))))
+          (tree/children-of nodes form))))
 
 (defn findings
   "Concurrency findings for one parsed file."

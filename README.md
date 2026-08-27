@@ -204,6 +204,41 @@ from a false positive or a miss on real code and says which. defnet's
 these as `:sift/boxed-math` / `:sift/reflection` on definitions;
 `op=hostwarn` lands the compiler's own answer beside them.
 
+**The node families, read the corpus way — no compiler judges these, so a
+person did.** Every `:node` finding on lume `src` (91 files), sift and
+agentia `lib` was read at its source line, 2026-08-27. Of 68: **13 were
+wrong and 4 rules were the cause**, each fixed at the cause and gated —
+`permissive-file-permissions` fired on `"401"` / `"403"` as OpenAPI
+response keys (4/4; now only a call argument under a mode-setting head,
+via `tree/parent`); `hardcoded-credential` on `ceremony-secret-type`
+bound to a slug (4/4; a name ending `-type`/`-kind`/`-name`/… names a
+kind of secret, not one); `unscoped-tenant-query` on agentia's single-user
+ledger (5/5; a file that never says owner, org or tenant has no tenant to
+scope by, and the rule is vacuous there — refused, the boundary checker's
+rule); `csrf-protection-absent` on `:delete` as a call argument and as a
+dispatch-table key (a route method is a map key whose VALUE is a map);
+`side-effect-in-swap` on `(reset! decision …)` of a `let`-local atom
+inside `swap!` — idempotent under retry, the CAS-with-a-decision idiom.
+What remains is a review list, not a defect list: 34 `unscoped-tenant-query`
+on lume, 8 `ambiguous-owner-check`, 2 CSRF on token-authenticated routes —
+all `:unspecified`, and whether any is a defect needs the data model, which
+sift does not hold. That is the honest ceiling for a node rule without a
+resolver, and it is why the families that CAN be judged by a compiler are
+the ones with numbers above.
+
+**One complexity engine — `metrics.cljc` no longer scores.** Sonar's
+file-level `:complexity` and `:cognitive` came from a node-stream count
+(`from-nodes`: one per branch node, nesting from depth) that nothing had
+ever validated; the unit engine had been measured against cccc (5,519 /
+5,531) and SonarJS (Spearman 0.989). `sift/measures` given TEXT now sums
+the unit engine over the file, and the difference on sift's own source is
+**cyclomatic 819 → 1,145, cognitive 1,617 → 1,359** — the old count was
+40% under on one and 16% over on the other. `from-nodes` keeps the size
+measures (ncloc, comment lines, functions, classes, statements) and the
+node-stream shape for a consumer that has only nodes; sonar-clojure's
+sensor passes text now. A top-level form outside any unit is not scored,
+as Sonar does not score it.
+
 **Every finding carries** `:rule`, `:category` (Credo's `:refactor`
 `:readability` `:design` `:warning` `:consistency`), `:instruction`, and an
 `:applicability` on clippy's four rungs — `:machine-applicable`,

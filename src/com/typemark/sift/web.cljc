@@ -53,8 +53,22 @@
                                     (re-find #"(?i)anti-forgery|csrf" (:text n))))
                        nodes)]
      (when (and methods (not guarded))
+       ;; a route METHOD is a map key whose value is a map — {:post {:handler
+       ;; h}}. `:delete` as an argument to (crud-decision … :delete id) is an
+       ;; operation, and {:delete (partial delete-op …)} is a dispatch table;
+       ;; both fired on lume, neither is a route.
        (for [n (take 1 (filter #(and (= :keyword (:type %))
-                                     (contains? state-changing (:text %))) nodes))]
+                                     (contains? state-changing (:text %))
+                                     (let [p (tree/parent nodes %)]
+                                       (and p (= :map (:tag p))
+                                            (let [v (->> (tree/children-of nodes p)
+                                                         (filter (fn [k] (and (= (:depth %) (:depth k))
+                                                                              (not= :trivia (:type k))
+                                                                              (or (> (:line k) (:line %))
+                                                                                  (and (= (:line k) (:line %)) (> (:col k) (:col %)))))))
+                                                         first)]
+                                              (and v (= :map (:tag v)))))))
+                               nodes))]
          {:rule "csrf-protection-absent"
           :line (:line n) :col (:col n) :end-line (:end-line n) :end-col (:end-col n)
           :message "state-changing routes here, and no anti-forgery middleware named in this namespace"})))

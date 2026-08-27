@@ -5,6 +5,7 @@
   ratio -- divides by ncloc. Without these the dashboard reports a project
   with no code and every ratio is undefined."
   (:require [clojure.string :as str]
+            [com.typemark.sift.complexity :as complexity]
             [com.typemark.sift.parse :as parse]))
 
 (defn- line-span [{:keys [line end-line]}] (range line (inc end-line)))
@@ -67,8 +68,23 @@
     {:ncloc-data      (line-map code span)
      :executable-data (line-map exec span)})))
 
+(defn with-complexity
+  "`:complexity` and `:cognitive` from the unit engine — the sum over every
+  unit of what `complexity.cljc` scored, which is what Sonar means by a
+  file's complexity — replacing the node-stream count that `from-nodes`
+  carries. `from-nodes` kept its own because it had only nodes; given the
+  text, one engine scores both the file and the units."
+  [m source path]
+  (let [{:keys [ok? functions]} (complexity/report source path)
+        units (when ok? (complexity/flatten-units functions))]
+    (if ok?
+      (assoc m :complexity (reduce + 1 (map #(dec (:cyclomatic % 1)) units))
+               :cognitive (reduce + 0 (map :cognitive units)))
+      m)))
+
 (defn measures
   "Measures for a source string, or nil when it does not parse."
-  [source]
-  (let [{:keys [ok? nodes]} (parse/parse source)]
-    (when ok? (from-nodes nodes))))
+  ([source] (measures source nil))
+  ([source path]
+   (let [{:keys [ok? nodes]} (parse/parse source)]
+     (when ok? (with-complexity (from-nodes nodes) source path)))))

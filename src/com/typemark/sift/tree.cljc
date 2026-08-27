@@ -50,6 +50,35 @@
          (filter #(= depth (:depth %)))
          (remove #(and (= (:line %) (:line lst)) (= (:text %) (:head lst)))))))
 
+(defn parent
+  "The node immediately enclosing `n` — depth one less, span containing —
+  or nil at top level. A string that is a MAP KEY has a :map parent and a
+  string that is a CALL ARGUMENT has a :list one; the permissions rule
+  could not tell \"401\" the HTTP status from \"401\" the mode until it
+  could ask."
+  [nodes n]
+  (let [d (dec (:depth n))]
+    (->> nodes
+         (filter #(and (= d (:depth %))
+                       (or (< (:line %) (:line n))
+                           (and (= (:line %) (:line n)) (<= (:col %) (:col n))))
+                       (or (> (:end-line %) (:end-line n))
+                           (and (= (:end-line %) (:end-line n)) (>= (:end-col %) (:end-col n))))))
+         last)))
+
+(defn let-bound-locals
+  "Names bound in any let/loop/binding vector in the stream to a call whose
+  head is in `inits` — `(let [decision (atom nil)] …)` -> #{\"decision\"}."
+  [nodes inits]
+  (into #{}
+        (for [l (lists-headed-by nodes #{"let" "loop" "let*" "when-let" "if-let"})
+              v (take 1 (filter #(= :vector (:tag %)) (children-of nodes l)))
+              :let [kids (->> (children-of nodes v) (remove #(= :trivia (:type %)))
+                              (filter #(= (inc (:depth v)) (:depth %))))]
+              [lhs rhs] (partition 2 kids)
+              :when (and (= :symbol (:type lhs)) (= :list (:tag rhs)) (contains? inits (:head rhs)))]
+          (:text lhs))))
+
 (defn first-argument [nodes lst]
   (first (arguments nodes lst)))
 

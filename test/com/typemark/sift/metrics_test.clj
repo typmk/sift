@@ -34,8 +34,9 @@
 (deftest a-binding-named-like-a-branch-is-not-a-branch
   (testing "(let [and 1] and) has no decision in it"
     (is (= 1 (:complexity (metrics/measures "(let [and 1] and)")))))
-  (testing "but a real and does"
-    (is (= 2 (:complexity (metrics/measures "(and a b)"))))))
+  (testing "but a real and does — inside a unit: complexity is summed over units, as Sonar sums it, and a top-level form outside any is not scored"
+    (is (= 2 (:complexity (metrics/measures "(defn f [a b] (and a b))"))))
+    (is (= 1 (:complexity (metrics/measures "(and a b)"))))))
 
 (deftest comments-inside-strings-are-code
   (let [m (metrics/measures "(def s \"; not a comment\")")]

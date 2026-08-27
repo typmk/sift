@@ -96,10 +96,16 @@
       :message (str "two-valued test on the tenant boundary: nil owner means both"
                     " untenanted and unresolved, and both would take this branch")})
 
+   ;; A file that never says owner, org or tenant anywhere has no tenant to
+   ;; scope a query by, and every query in it would be reported: agentia's
+   ;; single-user ledger, five of five. The rule is vacuous there, and a
+   ;; vacuous rule is refused rather than run — the boundary checker's rule.
    (let [defining (into #{} (mapcat #(map :text (tree/children-of nodes %)))
                         (tree/lists-headed-by nodes #{"defrecord" "deftype" "extend-type"
-                                                      "extend-protocol" "reify" "defprotocol"}))]
+                                                      "extend-protocol" "reify" "defprotocol"}))
+         tenanted? (boolean (some #(and (:text %) (not (:commented? %)) (re-find tenant-word (:text %))) nodes))]
      (for [l (tree/lists-headed-by nodes query-fns)
+           :when tenanted?
            :when (not (mentions? nodes l tenant-word))
            :when (not (only-shared? nodes l))
            :when (not (and (contains? defining (:head l))

@@ -12,6 +12,29 @@ running it on both, not by compiling it.
       {:findings (sift/findings nodes)
        :measures (sift/measures nodes)})
 
+Two more kinds of rule run over source TEXT rather than the node stream,
+because they need the tree:
+
+    (sift/unit-complexity source path)     ; per-unit cognitive, cyclomatic,
+                                           ; max nesting, params, children
+    (sift/complexity-findings source path) ; units over 15 (Sonar's default)
+    (sift/shape-findings source path)      ; place-as-fold, loop-as-map
+
+`complexity` follows Campbell's paper (SonarSource 2017) and was measured
+identical to cccc-core on 5,519 of 5,531 units of defnet; the 12 are lambdas
+inside `(comment …)`, which this treats as data. `shape` is the `places` rule
+set from agentia — an atom used as a fold, a loop that is a map — with its
+corpus as the spec under `test/…/corpus/{clear,flag}`.
+
+## The CLI
+
+    bin/sift shape <path>…                    # findings, exit 1 if any
+    bin/sift complexity [--threshold N] <path>…
+    bin/sift shape --edn src                  # as data
+
+A babashka script over the same namespaces, for a lint task or a prompt. defnet's
+`ingest op=scan` is the same rules attached to graph definitions.
+
 ## Why its own repo
 
 Two consumers on two runtimes. Putting it inside either reproduces an approach
@@ -35,7 +58,7 @@ nothing should.
 
     clojure -M:test
 
-45 tests, 134 assertions. `sonar-clojure` runs the same files a second time
+79 tests, 243 assertions. `sonar-clojure` runs the same files a second time
 through its own `:test` alias (`-d ../sift/test`): this harness proves the
 library stands alone, that one proves it still fits the consumer.
 

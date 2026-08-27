@@ -25,6 +25,7 @@
   (:require [com.typemark.sift.access :as access]
             [com.typemark.sift.analysis :as analysis]
             [com.typemark.sift.callgraph :as callgraph]
+            [com.typemark.sift.complexity :as complexity]
             [com.typemark.sift.concurrency :as concurrency]
             [com.typemark.sift.dictionary :as dictionary]
             [com.typemark.sift.highlight :as highlight]
@@ -33,6 +34,7 @@
             [com.typemark.sift.parse :as p]
             [com.typemark.sift.regex :as regex]
             [com.typemark.sift.security :as security]
+            [com.typemark.sift.shape :as shape]
             [com.typemark.sift.tests :as tests]
             [com.typemark.sift.web :as web]))
 
@@ -62,6 +64,25 @@
 
 (defn measures  "Size and complexity."                   [nodes] (metrics/from-nodes nodes))
 (defn line-data "Per-line measures."             [nodes truth]   (metrics/line-data nodes truth))
+(defn unit-complexity
+  "Per-UNIT cognitive and cyclomatic complexity, max nesting and parameter
+  count, over source TEXT rather than the node stream — the walk needs the
+  tree. NOT `complexity`: that is the child namespace's name, and the
+  `parse` rule above applies — measured, `sift/complexity` compiled and left
+  `com.typemark.sift.complexity.report` undefined under bun. `path` picks the `#?` branch (.cljs -> :cljs, else :clj).
+  {:ok? true :functions [unit …]} or {:ok? false :error msg}."
+  ([text] (complexity/report text nil))
+  ([text path] (complexity/report text path)))
+(defn shape-findings
+  "Places used as folds and loops that are maps, over source TEXT — the
+  `places` rules (agentia, DEFNET-4), now here. Each finding carries
+  `:instruction` and, when mechanical, a `:counterpart` form. See `shape`."
+  [text path] (shape/findings text path))
+(defn complexity-findings
+  "Units whose cognitive complexity exceeds `threshold` (default 15, Sonar's),
+  in the same finding shape as `findings`, under rule :cognitive-complexity."
+  ([text path] (complexity/findings text path))
+  ([text path threshold] (complexity/findings text path threshold)))
 (defn symbols   "Symbol table, from clj-kondo analysis." [text]   (analysis/symbols text))
 
 ;; ── rules ──────────────────────────────────────────────────────────────────

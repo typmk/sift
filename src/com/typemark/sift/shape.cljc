@@ -16,16 +16,16 @@
   the `--apply` that `places` had belongs to a gated editor, not a linter.
 
   `^:places/allow` on the binding peels a finding, as it did."
-  (:require [com.typemark.sift.fold :as fold]
+  (:require [com.typemark.sift.cond-case :as cond-case]
+            [com.typemark.sift.fold :as fold]
             [com.typemark.sift.map-loop :as map-loop]
+            [com.typemark.sift.resolve :as resolve]
             [rewrite-clj.parser :as parser]
             [rewrite-clj.zip :as z]))
 
-(def rules #{fold/rule map-loop/rule})
+(def rules #{fold/rule map-loop/rule cond-case/rule})
 
-(defn findings
-  "Source text -> findings, or [] if it does not read as forms. `file` is
-  carried onto every finding and is otherwise unused."
+(defn- findings*
   [text file]
   ;; `edn*`, not `of-string`: `of-string` moves to the FIRST form, and a
   ;; walk from there sees only the ns form. Measured: every corpus file
@@ -33,6 +33,17 @@
   (let [zloc (try (z/edn* (parser/parse-string-all text) {:track-position? true})
                   (catch #?(:clj Exception :cljs :default) _ nil))]
     (if zloc
-      (into (vec (fold/findings file zloc))
-            (map-loop/findings file zloc))
+      (-> (vec (fold/findings file zloc))
+          (into (map-loop/findings file zloc))
+          (into (cond-case/findings file zloc)))
       [])))
+
+(defn findings
+  "Source text -> findings, or [] if it does not read as forms. `file` is
+  carried onto every finding and, when `resolve-idx` (from `resolve/index`)
+  is given, picks this file's kondo resolution so aliased core vars are seen
+  and shadowed ones are not."
+  ([text file] (findings text file nil))
+  ([text file resolve-idx]
+   (binding [fold/*resolve* (resolve/for-file resolve-idx file)]
+     (findings* text file))))

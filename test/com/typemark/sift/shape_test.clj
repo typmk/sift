@@ -6,6 +6,7 @@
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
+            [com.typemark.sift.resolve :as resolve]
             [com.typemark.sift.shape :as shape]))
 
 (def ^:private root
@@ -68,7 +69,7 @@
     (is (seq fs))
     (is (every? (comp string? :instruction) fs))
     (is (every? (comp pos-int? :line) fs))
-    (is (every? #{:place-as-fold :loop-as-map} (map :rule fs)))))
+    (is (every? shape/rules (map :rule fs)))))
 
 (deftest loop-filter-map-is-comp
   (let [fs (lint (at "flag/loop_filter_map.clj"))
@@ -86,3 +87,34 @@
 
 (deftest unreadable-source-is-silent-not-thrown
   (is (= [] (shape/findings "(defn f [x" "bad.clj"))))
+
+;; ---- resolution: what only clj-kondo can say --------------------------------
+
+(deftest resolution-sees-aliased-core-and-ignores-shadowed
+  (let [f    (at "resolved/aliased_core_atom.clj")
+        idx  (resolve/index (slurp (at "resolved/aliased_core_atom.analysis.json")))
+        bare (shape/findings (slurp f) "aliased_core_atom.clj")
+        res  (shape/findings (slurp f) "aliased_core_atom.clj" idx)]
+    (testing "without resolution: the aliased atom is missed, the shadowed swap! is flagged"
+      (is (= [11] (map :line bare))))
+    (testing "with it: the aliased atom is found, the parameter named swap! is not a mutator"
+      (is (= [5] (map :line res)))
+      (is (= :mechanical (:applicability (first res)))))))
+
+;; ---- cond-as-case -----------------------------------------------------------
+
+(deftest cond-over-literals-is-a-case
+  (let [fs (lint (at "flag/cond_case.clj"))]
+    (is (= [:cond-as-case :cond-as-case] (map :rule fs)))
+    (is (every? #(= :mechanical (:applicability %)) fs))
+    (is (= '(case x :circle "round" :square "boxy" :line "thin" "unknown")
+           (:counterpart (first fs))))
+    (is (= '(case n 200 :ok 404 :missing) (:counterpart (second fs))))))
+
+(deftest cond-over-vars-is-not-a-case-and-over-nil-is-a-maybe
+  (is (empty? (shape/findings "(defn f [x] (cond (= x foo) 1 (= x bar) 2))" "s.clj"))
+      "case would read foo as a literal symbol")
+  (let [fs (shape/findings "(defn f [x] (cond (= x nil) 1 (= x true) 2))" "s.clj")]
+    (is (= 1 (count fs)))
+    (is (= :maybe (:applicability (first fs))))
+    (is (nil? (:counterpart (first fs))))))

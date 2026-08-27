@@ -18,13 +18,24 @@ because they need the tree:
     (sift/unit-complexity source path)     ; per-unit cognitive, cyclomatic,
                                            ; max nesting, params, children
     (sift/complexity-findings source path) ; units over 15 (Sonar's default)
-    (sift/shape-findings source path)      ; place-as-fold, loop-as-map
+    (sift/shape-findings source path)      ; place-as-fold, loop-as-map, cond-as-case
+    (sift/shape-findings source path (sift/resolution kondo-analysis-json))
 
 `complexity` follows Campbell's paper (SonarSource 2017) and was measured
 identical to cccc-core on 5,519 of 5,531 units of defnet; the 12 are lambdas
 inside `(comment …)`, which this treats as data. `shape` is the `places` rule
-set from agentia — an atom used as a fold, a loop that is a map — with its
-corpus as the spec under `test/…/corpus/{clear,flag}`.
+set from agentia — an atom used as a fold, a loop that is a map — plus a
+`cond` over literals that is a `case`, with its corpus as the spec under
+`test/…/corpus/{clear,flag,resolved}`.
+
+**sift never resolves a symbol; clj-kondo does, and sift reads it.** With an
+analysis (`clj-kondo --config '{:analysis {:locals true} :output {:format
+:json}}'`) the shape rules know that `(c/atom …)` is `clojure.core/atom` and
+that a parameter named `swap!` is not the mutator. Measured on the fixture
+under `corpus/resolved`: without it the aliased atom is missed and the
+parameter is flagged; with it, the reverse. Measured on defnet: no change in
+17 findings — the input is there for codebases that need it, not because this
+one did.
 
 ## The CLI
 
@@ -58,7 +69,7 @@ nothing should.
 
     clojure -M:test
 
-79 tests, 243 assertions. `sonar-clojure` runs the same files a second time
+82 tests, 256 assertions. `sonar-clojure` runs the same files a second time
 through its own `:test` alias (`-d ../sift/test`): this harness proves the
 library stands alone, that one proves it still fits the consumer.
 

@@ -10,8 +10,13 @@
   String keys on both platforms, because the callers index clj-kondo's output
   by its own key names and a keywordising reader would silently return nil for
   every one of them."
-  #?(:clj (:require [clojure.data.json :as json])))
+  ;; :bb before :clj — babashka reads the :bb branch and ships cheshire, not
+  ;; data.json; the JVM never sees :bb. Without it `bin/sift --analysis`
+  ;; failed to load this namespace at all.
+  #?(:bb  (:require [cheshire.core :as json])
+     :clj (:require [clojure.data.json :as json])))
 
 (defn read-str [s]
-  #?(:clj  (json/read-str s)
+  #?(:bb   (json/parse-string s)
+     :clj  (json/read-str s)
      :cljs (js->clj (js/JSON.parse s))))

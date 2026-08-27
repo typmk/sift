@@ -7,12 +7,15 @@
 ;;   sift complexity <path>…   units over the cognitive threshold (default 15)
 ;;   --edn                     print findings as EDN
 ;;   --threshold N             complexity only
+;;   --analysis FILE           shape only: clj-kondo analysis JSON, so aliased
+;;                             core vars resolve and shadowed ones do not
 ;;
 ;; Exit 1 when anything is reported, 0 when clean, 2 on usage. Reports; the
 ;; gate is the caller's — sift never writes.
 (require '[babashka.classpath :as cp] '[babashka.fs :as fs] '[clojure.string :as str])
 (cp/add-classpath (str (fs/parent (fs/parent (fs/real-path *file*))) "/src"))
 (require '[com.typemark.sift.shape :as shape]
+         '[com.typemark.sift.resolve :as resolve]
          '[com.typemark.sift.complexity :as cx])
 
 (defn- clj-file? [p] (contains? #{"clj" "cljs" "cljc"} (fs/extension p)))
@@ -38,12 +41,15 @@
       rest-args (rest args)
       edn?      (some #{"--edn"} rest-args)
       threshold (some->> rest-args (drop-while #(not= "--threshold" %)) second parse-long)
+      analysis  (some->> rest-args (drop-while #(not= "--analysis" %)) second)
+      resolution (when analysis (resolve/index (slurp analysis)))
       paths     (->> rest-args
                      (remove #(str/starts-with? % "--"))
                      (remove #(and threshold (= % (str threshold))))
+                     (remove #(and analysis (= % analysis)))
                      vec)
       run       (case cmd
-                  "shape"      (fn [file] (shape/findings (slurp file) file))
+                  "shape"      (fn [file] (shape/findings (slurp file) file resolution))
                   "complexity" (fn [file] (map #(assoc % :file file)
                                                (cx/findings (slurp file) file (or threshold cx/default-threshold))))
                   (usage))]

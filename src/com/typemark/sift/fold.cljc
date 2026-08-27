@@ -13,9 +13,6 @@
 
 (def rule :place-as-fold)
 
-(def instruction
-  "Do not accumulate in an atom. Use reduce (or into / group-by). Every branch, including else and catch, must return the accumulator. Do not swap! or reset!.")
-
 (def ^:private mutator-names
   #{"swap!" "reset!" "swap-vals!" "reset-vals!" "compare-and-set!"})
 
@@ -53,6 +50,39 @@
        (= n (name sym))
        (let [ns (namespace sym)]
          (or (nil? ns) (= "clojure.core" ns) (= "cljs.core" ns)))))
+
+(def ^:dynamic *resolve*
+  "{:vars {[row col] \"ns/name\"} :locals #{[row col]}} from `resolve/for-file`,
+  or nil. With it, a call form's head is what kondo says it is; without it,
+  the textual rule below decides, as it always did."
+  nil)
+
+(defn- resolved-head
+  "`clojure.core/atom` for a call form kondo resolved, nil otherwise."
+  [list-zloc]
+  (when *resolve*
+    (get (:vars *resolve*) (try (z/position list-zloc) (catch #?(:clj Exception :cljs :default) _ nil)))))
+
+(defn- local-call?
+  "kondo says the head of this call form is a LOCAL — a parameter named
+  `swap!` is not the mutator. A local usage in head position is keyed by
+  the call form's position, the same as a var usage."
+  [list-zloc]
+  (when *resolve*
+    (contains? (:locals *resolve*)
+               (try (z/position list-zloc) (catch #?(:clj Exception :cljs :default) _ nil)))))
+
+(defn- core-call?
+  "Is this list a call to clojure.core/<n>? Resolution first, text second."
+  [list-zloc n]
+  (let [z (peel list-zloc)]
+    (if-let [q (resolved-head z)]
+      (contains? #{(str "clojure.core/" n) (str "cljs.core/" n)} q)
+      (and (not (local-call? z))
+           (core-named? (list-op z) n)))))
+
+(def instruction
+  "Do not accumulate in an atom. Use reduce (or into / group-by). Every branch, including else and catch, must return the accumulator. Do not swap! or reset!.")
 
 (defn- token-name [zloc]
   (let [z (peel zloc)]
@@ -138,7 +168,7 @@
       (and parent
            (z/list? parent)
            (contains? mutator-names (some-> (list-op parent) name))
-           (core-named? (list-op parent) (name (list-op parent)))
+           (core-call? parent (name (list-op parent)))
            (same-form? (second cs) token-zloc))
       :mutate
       (and parent
@@ -218,7 +248,7 @@
     (boolean (or (m sym-zloc) (m init-zloc)))))
 
 (defn- atom-call? [zloc]
-  (core-named? (list-op (peel zloc)) "atom"))
+  (and (z/list? (peel zloc)) (core-call? zloc "atom")))
 
 (defn- atom-init-val [zloc]
   (when-let [init (z/right (z/down (peel zloc)))]

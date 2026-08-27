@@ -33,6 +33,7 @@
             [com.typemark.sift.metrics :as metrics]
             [com.typemark.sift.parse :as p]
             [com.typemark.sift.regex :as regex]
+            [com.typemark.sift.resolve :as resolve]
             [com.typemark.sift.security :as security]
             [com.typemark.sift.shape :as shape]
             [com.typemark.sift.tests :as tests]
@@ -73,11 +74,17 @@
   {:ok? true :functions [unit …]} or {:ok? false :error msg}."
   ([text] (complexity/report text nil))
   ([text path] (complexity/report text path)))
+(defn resolution
+  "clj-kondo analysis JSON -> the per-file resolution index `shape-findings`
+  takes. Build once per analysis, not per file."
+  [analysis-text] (resolve/index analysis-text))
 (defn shape-findings
   "Places used as folds and loops that are maps, over source TEXT — the
   `places` rules (agentia, DEFNET-4), now here. Each finding carries
-  `:instruction` and, when mechanical, a `:counterpart` form. See `shape`."
-  [text path] (shape/findings text path))
+  `:instruction` and, when mechanical, a `:counterpart` form. With a
+  `resolution`, aliased core vars are seen and shadowed ones are not."
+  ([text path] (shape/findings text path))
+  ([text path resolution] (shape/findings text path resolution)))
 (defn complexity-findings
   "Units whose cognitive complexity exceeds `threshold` (default 15, Sonar's),
   in the same finding shape as `findings`, under rule :cognitive-complexity."

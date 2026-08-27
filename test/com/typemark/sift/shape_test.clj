@@ -15,7 +15,7 @@
     f))
 
 (defn- corpus [kind]
-  (sort-by str (filter #(str/ends-with? (str %) ".clj")
+  (sort-by str (filter #(re-find #"\.clj[sc]?$" (str %))
                        (file-seq (io/file root kind)))))
 
 (defn- lint [f]
@@ -71,7 +71,7 @@
     (is (every? (comp pos-int? :line) fs))
     (is (every? shape/rules (map :rule fs)))
     (is (every? shape/applicability (map :applicability fs)))
-    (is (every? #{:refactor :readability} (map :category fs)))))
+    (is (every? #{:refactor :readability :warning :design} (map :category fs)))))
 
 (deftest loop-filter-map-is-comp
   (let [fs (lint (at "flag/loop_filter_map.clj"))
@@ -138,3 +138,25 @@
   (let [fs (lint (at "flag/loop_map.clj"))]
     (is (= 1 (count fs)))
     (is (= :loop-as-map (:rule (first fs))))))
+
+
+;; ---- host boundary ----------------------------------------------------------
+
+(deftest host-escapes-fire-on-the-jvm-file
+  (let [fs (lint (at "flag/host_escapes.clj"))
+        by (group-by :rule fs)]
+    (is (= 2 (count (:catch-all-swallow by))) "nil and :failed; the rethrow and the (ex-info) are not")
+    (is (= 2 (count (:mutable-escape by))) "(ArrayList.) and (HashMap. 16)")
+    (is (= 1 (count (:reflection-unwarned by))))
+    (is (= '(set! *warn-on-reflection* true) (:counterpart (first (:reflection-unwarned by)))))
+    (is (every? #{:warning :design} (map :category fs)))))
+
+(deftest js-prop-on-own-object-has-an-aget-counterpart
+  (let [fs (lint (at "flag/host_js_prop.cljs"))]
+    (is (= [:js-prop-on-own-object :js-prop-on-own-object] (map :rule fs)))
+    (is (= '(aget o "ns") (:counterpart (first fs))))
+    (is (every? #(= :machine-applicable (:applicability %)) fs))))
+
+(deftest host-clear-files-are-silent
+  (is (empty? (lint (at "clear/host_ok.clj"))))
+  (is (empty? (lint (at "clear/host_js_ok.cljs")))))

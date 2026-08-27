@@ -19,6 +19,7 @@
   `^:places/allow` on the binding peels a finding, as it did."
   (:require [com.typemark.sift.cond-case :as cond-case]
             [com.typemark.sift.fold :as fold]
+            [com.typemark.sift.host :as host]
             [com.typemark.sift.loop-fold :as loop-fold]
             [com.typemark.sift.map-loop :as map-loop]
             [com.typemark.sift.resolve :as resolve]
@@ -33,7 +34,12 @@
   {fold/rule      {:category :refactor :instruction fold/instruction}
    map-loop/rule  {:category :refactor :instruction map-loop/instruction}
    loop-fold/rule {:category :refactor :instruction loop-fold/instruction}
-   cond-case/rule {:category :readability :instruction cond-case/instruction}})
+   cond-case/rule {:category :readability :instruction cond-case/instruction}
+   ;; the host boundary — see host.cljc
+   :catch-all-swallow     (:catch-all-swallow host/rules)
+   :mutable-escape        (:mutable-escape host/rules)
+   :js-prop-on-own-object (:js-prop-on-own-object host/rules)
+   :reflection-unwarned   (:reflection-unwarned host/rules)})
 
 (def applicability
   "clippy's four rungs, so an editor knows what it may apply unasked:
@@ -52,11 +58,13 @@
     (if zloc
       (let [maps (map-loop/findings file zloc)
             taken (into #{} (map (juxt :line :column)) maps)]
-        (mapv (fn [f] (assoc f :category (get-in rules [(:rule f) :category])))
+        (mapv (fn [f] (let [{:keys [category instruction]} (get rules (:rule f))]
+                        (assoc f :category category :instruction (or (:instruction f) instruction))))
               (-> (vec (fold/findings file zloc))
                   (into maps)
                   (into (loop-fold/findings file zloc taken))
-                  (into (cond-case/findings file zloc)))))
+                  (into (cond-case/findings file zloc))
+                  (into (host/findings file zloc)))))
       [])))
 
 (defn findings

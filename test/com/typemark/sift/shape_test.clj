@@ -44,20 +44,20 @@
 (deftest counterpart-is-reduce
   (let [fs (lint (at "flag/atom_accumulator.clj"))]
     (is (= 1 (count fs)))
-    (is (= :mechanical (:applicability (first fs))))
+    (is (= :machine-applicable (:applicability (first fs))))
     (is (= 'reduce (first (:counterpart (first fs)))))))
 
 (deftest if-branch-has-no-counterpart
   (let [fs (lint (at "flag/if_branch.clj"))]
     (is (seq fs))
     (is (nil? (:counterpart (first fs))))
-    (is (= :maybe (:applicability (first fs))))))
+    (is (= :unspecified (:applicability (first fs))))))
 
 (deftest loop-map-is-into
   (let [fs (lint (at "flag/loop_map.clj"))]
     (is (seq fs))
     (is (every? #(= :loop-as-map (:rule %)) fs))
-    (is (= :mechanical (:applicability (first fs))))
+    (is (= :machine-applicable (:applicability (first fs))))
     (is (= 'into (first (:counterpart (first fs)))))))
 
 (deftest allow-is-honoured
@@ -69,14 +69,16 @@
     (is (seq fs))
     (is (every? (comp string? :instruction) fs))
     (is (every? (comp pos-int? :line) fs))
-    (is (every? shape/rules (map :rule fs)))))
+    (is (every? shape/rules (map :rule fs)))
+    (is (every? shape/applicability (map :applicability fs)))
+    (is (every? #{:refactor :readability} (map :category fs)))))
 
 (deftest loop-filter-map-is-comp
   (let [fs (lint (at "flag/loop_filter_map.clj"))
         form (:counterpart (first fs))]
     (is (seq fs))
     (is (= :loop-as-map (:rule (first fs))))
-    (is (= :mechanical (:applicability (first fs))))
+    (is (= :machine-applicable (:applicability (first fs))))
     (is (= 'into (first form)))
     (is (= 'comp (first (nth form 2))))))
 
@@ -99,14 +101,14 @@
       (is (= [11] (map :line bare))))
     (testing "with it: the aliased atom is found, the parameter named swap! is not a mutator"
       (is (= [5] (map :line res)))
-      (is (= :mechanical (:applicability (first res)))))))
+      (is (= :machine-applicable (:applicability (first res)))))))
 
 ;; ---- cond-as-case -----------------------------------------------------------
 
 (deftest cond-over-literals-is-a-case
   (let [fs (lint (at "flag/cond_case.clj"))]
     (is (= [:cond-as-case :cond-as-case] (map :rule fs)))
-    (is (every? #(= :mechanical (:applicability %)) fs))
+    (is (every? #(= :machine-applicable (:applicability %)) fs))
     (is (= '(case x :circle "round" :square "boxy" :line "thin" "unknown")
            (:counterpart (first fs))))
     (is (= '(case n 200 :ok 404 :missing nil) (:counterpart (second fs)))
@@ -117,7 +119,7 @@
       "case would read foo as a literal symbol")
   (let [fs (shape/findings "(defn f [x] (cond (= x nil) 1 (= x true) 2))" "s.clj")]
     (is (= 1 (count fs)))
-    (is (= :maybe (:applicability (first fs))))
+    (is (= :unspecified (:applicability (first fs))))
     (is (nil? (:counterpart (first fs))))))
 
 ;; ---- loop-as-reduce ---------------------------------------------------------
@@ -125,7 +127,7 @@
 (deftest loop-threading-an-accumulator-is-a-reduce
   (let [fs (lint (at "flag/loop_reduce.clj"))]
     (is (= [:loop-as-reduce :loop-as-reduce :loop-as-reduce] (map :rule fs)))
-    (is (every? #(= :mechanical (:applicability %)) fs))
+    (is (every? #(= :machine-applicable (:applicability %)) fs))
     (is (= '(reduce (fn [acc x] (+ acc x)) 0 nums) (:counterpart (first fs))))
     (is (= '(reduce (fn [acc r] (assoc acc (:id r) r)) {} rows) (:counterpart (second fs)))
         "binding order reversed, empty? test, let-bound element")

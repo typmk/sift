@@ -15,48 +15,13 @@
   default THROWS. The counterpart carries an explicit `nil` default for that
   reason — measured in clojure.core itself, two of seven hits had no `:else`,
   and the shorter rewrite would have changed what they return."
-  (:require [rewrite-clj.zip :as z]))
+  (:require [com.typemark.sift.zip :refer [children peel list-op op-name inside-defn? collect]]
+            [rewrite-clj.zip :as z]))
 
 (def rule :cond-as-case)
 
 (def instruction
   "Do not compare one value against literals clause by clause. Use case: (case x :a … :b … default). Keep the clause bodies; drop the (= x …) tests.")
-
-(defn- children [zloc]
-  (loop [z (z/down zloc) acc []]
-    (if z (recur (z/right z) (conj acc z)) acc)))
-
-(defn- peel [zloc]
-  (loop [z zloc]
-    (if (and z (= :meta (z/tag z)))
-      (recur (last (children z)))
-      z)))
-
-(defn- list-op [zloc]
-  (let [z (peel zloc)]
-    (when (and z (z/list? z))
-      (when-let [h (z/down z)]
-        (try (z/sexpr h) (catch #?(:clj Exception :cljs :default) _ nil))))))
-
-(defn- op-name [sym] (when (symbol? sym) (name sym)))
-
-(defn- inside-defn? [zloc]
-  (loop [z (z/up zloc)]
-    (cond
-      (nil? z) false
-      (contains? #{"defn" "defn-" "fn" "fn*" "defmacro" "defmethod"} (op-name (list-op z))) true
-      :else (recur (z/up z)))))
-
-(defn- collect [zloc pred]
-  (let [acc (volatile! [])]
-    (letfn [(w [z]
-              (when (pred z) (vswap! acc conj z))
-              (when-not (or (= :uneval (z/tag z))
-                            (= :quote (z/tag z))
-                            (contains? #{"comment" "quote"} (op-name (list-op z))))
-                (doseq [c (children z)] (w c))))]
-      (w zloc)
-      @acc)))
 
 (defn- literal? [v]
   (or (keyword? v) (number? v) (string? v) (char? v) (nil? v) (boolean? v)))
@@ -104,7 +69,7 @@
                    :shape :cond-as-case
                    :message (str "cond compares " x " against " (count body) " literals; the counterpart is case")
                    :instruction instruction
-                   :applicability (if mechanical? :mechanical :maybe)}
+                   :applicability (if mechanical? :machine-applicable :unspecified)}
             mechanical?
             (assoc :counterpart
                    (concat (list 'case x)

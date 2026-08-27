@@ -12,7 +12,8 @@
 
   Each finding carries `:instruction` — the rewrite an agent is told to
   apply — and, when the body is a lone `swap!`/`reset!` on the atom, a
-  `:counterpart` form with `:applicability :mechanical`. sift never writes;
+  `:counterpart` form with `:applicability :machine-applicable` — clippy's four
+  rungs, see `applicability`. sift never writes;
   the `--apply` that `places` had belongs to a gated editor, not a linter.
 
   `^:places/allow` on the binding peels a finding, as it did."
@@ -24,7 +25,22 @@
             [rewrite-clj.parser :as parser]
             [rewrite-clj.zip :as z]))
 
-(def rules #{fold/rule map-loop/rule loop-fold/rule cond-case/rule})
+(def rules
+  "Every shape rule, with the category a consumer gates on (Credo's five:
+  :refactor :readability :design :warning :consistency) and the instruction
+  an agent is handed. A registry, not a set, so this is where a rule's
+  metadata lives and a rule file is only its matcher and counterpart."
+  {fold/rule      {:category :refactor :instruction fold/instruction}
+   map-loop/rule  {:category :refactor :instruction map-loop/instruction}
+   loop-fold/rule {:category :refactor :instruction loop-fold/instruction}
+   cond-case/rule {:category :readability :instruction cond-case/instruction}})
+
+(def applicability
+  "clippy's four rungs, so an editor knows what it may apply unasked:
+  :machine-applicable — apply it; :maybe-incorrect — a form that is usually
+  right; :has-placeholders — a form with a hole a human fills;
+  :unspecified — a finding with no form."
+  #{:machine-applicable :maybe-incorrect :has-placeholders :unspecified})
 
 (defn- findings*
   [text file]
@@ -36,10 +52,11 @@
     (if zloc
       (let [maps (map-loop/findings file zloc)
             taken (into #{} (map (juxt :line :column)) maps)]
-        (-> (vec (fold/findings file zloc))
-            (into maps)
-            (into (loop-fold/findings file zloc taken))
-            (into (cond-case/findings file zloc))))
+        (mapv (fn [f] (assoc f :category (get-in rules [(:rule f) :category])))
+              (-> (vec (fold/findings file zloc))
+                  (into maps)
+                  (into (loop-fold/findings file zloc taken))
+                  (into (cond-case/findings file zloc)))))
       [])))
 
 (defn findings

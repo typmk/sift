@@ -17,80 +17,19 @@
   mentions the seq — `(first xs)` became the element — otherwise a `maybe`
   with the form still attached. `loop-as-map` runs first and owns the
   `[]`/`conj` special case; this rule skips a loop that one already named."
-  (:require [rewrite-clj.zip :as z]))
+  (:require [com.typemark.sift.zip :refer [peel list-op op-name call? inside-defn? collect two-binds single-body]]
+            [rewrite-clj.zip :as z]))
 
 (def rule :loop-as-reduce)
 
 (def instruction
   "Do not walk a seq with loop/recur to thread an accumulator. Use (reduce (fn [acc x] …) init coll). Keep the step expression; drop the seq binding and the exhaustion test.")
 
-(defn- children [zloc]
-  (loop [z (z/down zloc) acc []]
-    (if z (recur (z/right z) (conj acc z)) acc)))
-
-(defn- peel [zloc]
-  (loop [z zloc]
-    (if (and z (= :meta (z/tag z)))
-      (recur (last (children z)))
-      z)))
-
-(defn- list-op [zloc]
-  (let [z (peel zloc)]
-    (when (and z (z/list? z))
-      (when-let [h (z/down z)]
-        (try (z/sexpr h) (catch #?(:clj Exception :cljs :default) _ nil))))))
-
-(defn- op-name [sym] (when (symbol? sym) (name sym)))
-
-(defn- call? [form n]
-  (and (seq? form) (symbol? (first form)) (= n (name (first form)))))
-
 (defn- seq-of? [form xs] (and (call? form "seq") (= xs (second form))))
 (defn- empty-of? [form xs] (and (call? form "empty?") (= xs (second form))))
 (defn- step-of? [form xs]
   (and (or (call? form "rest") (call? form "next")) (= xs (second form))))
 (defn- first-of? [form xs] (and (call? form "first") (= xs (second form))))
-
-(defn- inside-defn? [zloc]
-  (loop [z (z/up zloc)]
-    (cond
-      (nil? z) false
-      (contains? #{"defn" "defn-" "fn" "fn*" "defmacro" "defmethod"} (op-name (list-op z))) true
-      :else (recur (z/up z)))))
-
-(defn- collect [zloc pred]
-  (let [acc (volatile! [])]
-    (letfn [(w [z]
-              (when (pred z) (vswap! acc conj z))
-              (when-not (or (= :uneval (z/tag z))
-                            (= :quote (z/tag z))
-                            (contains? #{"comment" "quote"} (op-name (list-op z))))
-                (doseq [c (children z)] (w c))))]
-      (w zloc)
-      @acc)))
-
-(defn- two-binds [zloc]
-  (let [vz (when-let [d (z/down (peel zloc))]
-             (let [v (z/right d)] (when (z/vector? v) v)))]
-    (when vz
-      (let [pairs (loop [z (z/down vz) acc []]
-                    (if (nil? z)
-                      acc
-                      (if-let [rhs (z/right z)]
-                        (recur (z/right rhs)
-                               (conj acc [(try (z/sexpr z) (catch #?(:clj Exception :cljs :default) _ ::no))
-                                          (try (z/sexpr rhs) (catch #?(:clj Exception :cljs :default) _ ::no))]))
-                        acc)))]
-        (when (and (= 2 (count pairs))
-                   (every? #(and (symbol? (first %)) (not= ::no (second %))) pairs))
-          pairs)))))
-
-(defn- loop-body [zloc]
-  (when-let [d (z/down (peel zloc))]
-    (when-let [vz (z/right d)]
-      (when-let [body (z/right vz)]
-        (when (nil? (z/right body))
-          (try (z/sexpr body) (catch #?(:clj Exception :cljs :default) _ nil)))))))
 
 (defn- split-if
   "`(if T A B)` -> {:xs sym :walk A :done B} when T names the seq via
@@ -142,7 +81,7 @@
 
 (defn- finding [file zloc binds]
   (let [syms (map first binds)
-        body (loop-body zloc)]
+        body (single-body zloc)]
     (when-let [{:keys [xs walk done]} (split-if body syms)]
       (let [acc (first (remove #{xs} syms))
             xs-first? (= xs (ffirst binds))
@@ -162,7 +101,7 @@
                :shape :loop-as-reduce
                :message (str "loop threads " acc " over " xs "; the counterpart is reduce")
                :instruction instruction
-               :applicability (if mechanical? :mechanical :maybe)
+               :applicability (if mechanical? :machine-applicable :has-placeholders)
                :counterpart (list 'reduce (list 'fn [acc x] body') init coll)})))))))
 
 (defn findings

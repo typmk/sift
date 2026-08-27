@@ -7,41 +7,15 @@
 
    A counterpart is emitted only when the doseq body is a single
    swap!/reset! on that atom. Anything else is a finding without a form
-   — :mechanical is not a doseq-count."
-  (:require [clojure.walk :as walk]
+   — :machine-applicable is not a doseq-count."
+  (:require [com.typemark.sift.zip :refer [children peel list-op op-name token-name pos-of same-form? binder-vec vec-pairs collect inside-defn?]]
+            [clojure.walk :as walk]
             [rewrite-clj.zip :as z]))
 
 (def rule :place-as-fold)
 
 (def ^:private mutator-names
   #{"swap!" "reset!" "swap-vals!" "reset-vals!" "compare-and-set!"})
-
-(defn- pos-of [zloc]
-  (try (z/position zloc) (catch #?(:clj Exception :cljs :default) _ nil)))
-
-(defn- same-form? [a b]
-  (and a b (= (pos-of a) (pos-of b))))
-
-(defn- children [zloc]
-  (loop [z (z/down zloc) acc []]
-    (if z (recur (z/right z) (conj acc z)) acc)))
-
-(defn- peel
-  "^:places/allow acc is a :meta node. Walk to the form."
-  [zloc]
-  (loop [z zloc]
-    (if (and z (= :meta (z/tag z)))
-      (recur (last (children z)))
-      z)))
-
-(defn- list-op [zloc]
-  (let [z (peel zloc)]
-    (when (and z (z/list? z))
-      (when-let [h (z/down z)]
-        (try (z/sexpr h) (catch #?(:clj Exception :cljs :default) _ nil))))))
-
-(defn- op-name [sym]
-  (when (symbol? sym) (name sym)))
 
 (defn- core-named?
   "atom / clojure.core/atom / cljs.core/atom. Not m/atom."
@@ -84,29 +58,6 @@
 (def instruction
   "Do not accumulate in an atom. Use reduce (or into / group-by). Every branch, including else and catch, must return the accumulator. Do not swap! or reset!.")
 
-(defn- token-name [zloc]
-  (let [z (peel zloc)]
-    (when (and z (#{:token} (z/tag z)))
-      (try (let [s (z/sexpr z)]
-             (when (symbol? s) (name s)))
-           (catch #?(:clj Exception :cljs :default) _ nil)))))
-
-(defn- binder-vec
-  "Binding vector of let/loop/doseq/for/dotimes, or nil."
-  [zloc]
-  (when (contains? #{"let" "let*" "loop" "doseq" "for" "dotimes" "binding"}
-                   (op-name (list-op zloc)))
-    (when-let [v (z/right (z/down (peel zloc)))]
-      (when (z/vector? v) v))))
-
-(defn- vec-pairs [vz]
-  (loop [z (z/down vz) acc []]
-    (if (nil? z)
-      acc
-      (if-let [rhs (z/right z)]
-        (recur (z/right rhs) (conj acc [z rhs]))
-        acc))))
-
 (defn- binds-name? [zloc nm]
   (or (when-let [vz (binder-vec zloc)]
         (some (fn [[lhs _]] (= nm (token-name lhs))) (vec-pairs vz)))
@@ -131,22 +82,6 @@
       (same-form? z let-zloc) true
       (binds-name? z nm) false
       :else (recur (z/up z)))))
-
-(defn- opaque?
-  "#_ , (comment …), quote. Their children are not runtime usages."
-  [zloc]
-  (or (= :uneval (z/tag zloc))
-      (= :quote (z/tag zloc))
-      (contains? #{"comment" "quote"} (op-name (list-op zloc)))))
-
-(defn- collect [zloc pred]
-  (let [acc (volatile! [])]
-    (letfn [(w [z]
-              (when (pred z) (vswap! acc conj z))
-              (when-not (opaque? z)
-                (doseq [c (children z)] (w c))))]
-      (w zloc)
-      @acc)))
 
 (defn- fn-head
   "#() is a :fn node whose children are the body tokens, not a wrapping list."
@@ -325,7 +260,7 @@
                      (list 'fn [acc-sym bind] body)
                      init-val
                      coll)
-         :applicability :mechanical}))))
+         :applicability :machine-applicable}))))
 
 (defn- finding [file let-zloc sym-zloc init-zloc usages]
   (let [nm (token-name sym-zloc)
@@ -344,7 +279,7 @@
              :shape :atom-as-fold
              :message "place used as a fold; the counterpart is reduce"
              :instruction instruction
-             :applicability (or (:applicability cp) :maybe)}
+             :applicability (or (:applicability cp) :unspecified)}
       (:form cp) (assoc :counterpart (:form cp)))))
 
 (defn- verdict [file let-zloc sym-zloc init-zloc]
@@ -365,15 +300,6 @@
           (contains? kinds :escape) nil
           (some #(decline-fn? % let-zloc) mutate-z) nil
           :else (finding file let-zloc sym-zloc init-zloc usages))))))
-
-(defn- inside-defn? [zloc]
-  (loop [z (z/up zloc)]
-    (cond
-      (nil? z) false
-      (contains? #{"defn" "defn-" "fn" "fn*" "defmacro" "defmethod"}
-                 (op-name (list-op z)))
-      true
-      :else (recur (z/up z)))))
 
 (defn- atom-bindings [let-zloc]
   (when-let [vz (binder-vec let-zloc)]

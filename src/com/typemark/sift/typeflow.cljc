@@ -873,7 +873,7 @@
                           (doseq [k (drop 2 (children m))] (walk env' k))))
 
                       (contains? #{"fn" "fn*" "defn" "defn-" "defmethod"} h)
-                      (let [argv (first (filter #(z/vector? (peel %)) kids))
+                      (let [argv (some (fn [x] (when (z/vector? (peel x)) x)) kids)
                             ;; (defn f ([^double t] …) ([^double t ps] …)) — each arity
                             ;; carries its own hints; the first VECTOR child is none of
                             ;; them, and kora's calculus read as 553 boxed operations
@@ -989,7 +989,7 @@
   fact for defnet's conflicts table, so both are returned."
   [host d]
   (let [kids (children d)
-        argv (first (filter #(z/vector? (peel %)) kids))
+        argv (some (fn [x] (when (z/vector? (peel x)) x)) kids)
         arities (if argv
                   [[(peel argv) (last kids)]]
                   (for [k kids :let [a (peel k)] :when (and (z/list? a) (some-> a children first peel z/vector?))]
@@ -1019,7 +1019,7 @@
                  *js-aliases* (js-aliases-of zloc)]
          (vec (for [d (->> (children zloc) (map peel) (filter #(and % (z/list? %) (contains? #{"defn" "defn-"} (head-name %)))))
                     :let [[_ nm & rest] (children d)
-                          argv (first (filter #(z/vector? (peel %)) rest))
+                          argv (some (fn [x] (when (z/vector? (peel x)) x)) rest)
                           declared? (or (hint-of nm) (some-> argv hint-of))
                           [line _] (pos-of d)]
                     :when (and (token-name nm) (not declared?))

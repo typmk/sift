@@ -73,12 +73,14 @@
                      (filter #(or (empty? names) (names (:name %)))))]
   (println "typeflow vs the host compiler, per corpus")
   (printf "%-12s %-10s %-11s %s%n" "corpus" "role" "kind" "oracle predicted tp fp fn  precision recall")
-  (doseq [{:keys [name root oracle role]} manifests
+  (doseq [{:keys [name root oracle role kinds]} manifests
           :let [root (expand root) oracle (expand oracle)]]
     (if-not (and (or (fs/exists? (str oracle "/notes.edn")) (fs/exists? (str oracle "/closure.log"))) (fs/exists? root))
       (printf "%-12s %-10s SKIPPED — %s%n" name (clojure.core/name role)
               (if (fs/exists? root) (str "no oracle at " oracle " (run bin/oracle in the project)") (str "no source at " root)))
-      (doseq [kind (if (fs/exists? (str oracle "/closure.log")) ["uninferred"] ["boxed-math" "reflection"])]
+      ;; :kinds in the manifest restricts what this oracle can judge — a
+      ;; classpath run that warns on reflection but cannot on boxing
+      (doseq [kind (or kinds (if (fs/exists? (str oracle "/closure.log")) ["uninferred"] ["boxed-math" "reflection"]))]
         (let [{:keys [oracle predicted tp fp fn p r fns fps]} (judge root oracle kind)]
           (printf "%-12s %-10s %-11s %4d %4d %4d %4d %4d  P %.3f R %.3f%n" name (clojure.core/name role) kind oracle predicted tp fp fn p r)
           (when (residue)

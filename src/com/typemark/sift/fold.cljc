@@ -63,7 +63,7 @@
         (some (fn [[lhs _]] (= nm (token-name lhs))) (vec-pairs vz)))
       (when (= "fn" (op-name (list-op zloc)))
         (let [xs (children (peel zloc))
-              params (first (filter z/vector? xs))]
+              params (some (fn [x] (when (z/vector? x) x)) xs)]
           (when params
             (some (fn [c] (= nm (token-name c))) (children params)))))
       (when (= "letfn" (op-name (list-op zloc)))
@@ -245,15 +245,14 @@
 (defn- counterpart [let-zloc acc-sym init-val mutates]
   (let [doseqs (collect let-zloc
                         (fn [z] (= "doseq" (op-name (list-op z)))))
-        host (first (filter (fn [d]
+        host (some (fn [x] (when ((fn [d]
                               (some (fn [m]
                                       (loop [z m]
                                         (cond
                                           (nil? z) false
                                           (same-form? z d) true
                                           :else (recur (z/up z)))))
-                                    mutates))
-                            doseqs))]
+                                    mutates)) x) x)) doseqs)]
     (when (and host (= 1 (count doseqs)))
       (when-let [{:keys [bind coll body]} (simple-doseq host acc-sym)]
         {:form (list 'reduce

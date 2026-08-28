@@ -287,6 +287,15 @@ host still is. What the runs changed in sift: a finding in a file the
 oracle never compiled says so on itself; an unqualified head is this
 namespace's var before core's; taint findings name their ends.
 
+**The files no plain classpath compiles, judged after all.** sonar-clojure's
+14 plugin-classpath files got `*warn-on-reflection*` and the plugin's own
+suite emitted 201 distinct reflective sites; sift had predicted 200 for
+those files and called every one `:unjudged`. Converted to notes as a
+second corpus (`sonar-clojure-plugin`, `:kinds ["reflection"]` — that run
+cannot warn on boxing): **200 / 201, P 1.00 R 0.995**, and the one miss
+is named on its manifest — an enum's `valueOf` on a `^String`-hinted `or`.
+A manifest may name which kinds its oracle can judge.
+
 **Four scripts.** `bin/oracle` (JVM: notes, loaded, tags, kondo),
 `bin/oracle-js` (Closure's extern names), `bin/validate` (the scorecard;
 it judges in-process — `falsify` is folded in; `--residue` prints the

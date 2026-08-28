@@ -85,8 +85,8 @@
     (when-let [{:keys [xs walk done]} (split-if body syms)]
       (let [acc (first (remove #{xs} syms))
             xs-first? (= xs (ffirst binds))
-            coll (second (first (filter #(= xs (first %)) binds)))
-            init (second (first (filter #(= acc (first %)) binds)))]
+            coll (second (some (fn [x] (when (= xs (first x)) x)) binds))
+            init (second (some (fn [x] (when (= acc (first x)) x)) binds))]
         (when (and acc (= done acc))
           (when-let [{:keys [expr el]} (step walk xs acc xs-first?)]
             (let [x (or el 'x)

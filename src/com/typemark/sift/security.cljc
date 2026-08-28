@@ -169,8 +169,8 @@
   "The statement: the first element of the `[sql & params]` vector. Reading
   the wrong position is how a correctly parameterised call gets flagged."
   [nodes l]
-  (when-let [v (first (filter #(= :vector (:tag %)) (tree/children-of nodes l)))]
-    (first (filter #(= (inc (:depth v)) (:depth %)) (tree/children-of nodes v)))))
+  (when-let [v (some (fn [x] (when (= :vector (:tag x)) x)) (tree/children-of nodes l))]
+    (some (fn [x] (when (= (inc (:depth v)) (:depth x)) x)) (tree/children-of nodes v))))
 
 (defn- reaching-sinks
   "SQL calls whose statement is a bare symbol -- a string that arrived from

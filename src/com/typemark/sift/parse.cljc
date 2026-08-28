@@ -18,6 +18,8 @@
             [rewrite-clj.node :as n]
             [rewrite-clj.parser :as p]))
 
+#?(:clj (set! *warn-on-reflection* true))
+
 (def ^:private trivia #{:whitespace :newline :comma})
 
 (defn- classify

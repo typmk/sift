@@ -73,9 +73,13 @@
   (let [nses (->> ns-forms (mapcat (fn [form] (for [c (rest form) :when (and (seq? c) (= :require (first c))) spec (rest c)]
                                                (cond (symbol? spec) spec (sequential? spec) (first spec)))))
                   (remove nil?) (cons 'clojure.core) (concat (map second ns-forms)) distinct)
+        ;; a namespace that did not load has no interns to read: sonar-clojure's
+        ;; 14 unloadable files threw here and the run wrote no tags.edn at all,
+        ;; so its first score was judged with no table and read as five false
+        ;; reflections
         vars (into (sorted-map)
                    (for [n nses
-                         :let [ok (try (require n) true (catch Throwable _ false))]
+                         :let [ok (try (require n) (some? (find-ns n)) (catch Throwable _ false))]
                          :when ok
                          ;; ns-interns, not ns-publics: a defn- carries a return hint the
                          ;; compiler reads exactly as a public one's — lume's private

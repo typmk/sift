@@ -20,7 +20,9 @@
   (let [ledger (sift/evidence)]
     (is (every? (comp rungs :evidence) (vals ledger)))
     (is (= :unjudged (sift/evidence-of :no-such-rule :node)) "an unlisted rule is unjudged")
-    (is (zero? (count (filter #(= :unjudged (:evidence %)) (vals ledger)))) "nothing registered is unjudged")))
+    (testing "an :unjudged entry is allowed only with a note saying what would judge it"
+      (doseq [[r e] ledger :when (= :unjudged (:evidence e))]
+        (is (string? (:note e)) (str r " is unjudged and says nothing about why"))))))
 
 (deftest a-finding-carries-its-rung
   (testing "a node rule read on real code"

@@ -265,3 +265,9 @@
            (tf/inferred "(ns m)\n(defn m ([x] (str x)) ([^long a ^long b] (+ a b)))" "m.clj" {:var-tags vt}))
         "arities that disagree are both returned — a conflict is a fact")))
 
+(deftest an-unqualified-head-is-this-namespace-s-var-before-core-s
+  ;; sonar-clojure junit.clj: (.newDocumentBuilder (safe-factory)) on a
+  ;; ^DocumentBuilderFactory defn- in the same file, without kondo
+  (is (= [] (kinds* "(ns s)\n(defn f [] (.newDocumentBuilder (safe-factory)))" {:var-tags {"s/safe-factory" "javax.xml.parsers.DocumentBuilderFactory"}})))
+  (is (= [:reflection] (kinds "(ns s)\n(defn f [] (.newDocumentBuilder (safe-factory)))"))))
+

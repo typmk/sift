@@ -137,6 +137,7 @@
       ;; bin/oracle's directory: the JVM's var tags and class table, so
       ;; typeflow's findings are judged and not :unjudged
       dump      (when odir (let [f (str odir "/tags.edn")] (when (fs/exists? f) (edn/read-string (slurp f)))))
+      loaded    (when odir (let [f (str odir "/loaded.edn")] (when (fs/exists? f) (set (edn/read-string (slurp f))))))
       base-file (some->> rest-args (drop-while #(not= "--baseline" %)) second)
       write-base (some->> rest-args (drop-while #(not= "--write-baseline" %)) second)
       family    (some->> rest-args (drop-while #(not= "--family" %)) second keyword)
@@ -155,7 +156,7 @@
       run       (case cmd
                   "lint"       (fn [file]
                                  (let [{:keys [ok? error findings]} (sift/analyze {:text (slurp file) :path file :resolution resolution
-                                                                                   :var-tags (:vars dump) :classes dump
+                                                                                   :var-tags (:vars dump) :classes dump :loaded loaded
                                                                                    :tenanted? @tenanted})]
                                    (if-not ok?
                                      [{:file file :line 1 :column 1 :rule :unparseable :message error}]

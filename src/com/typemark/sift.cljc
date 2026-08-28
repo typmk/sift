@@ -167,7 +167,10 @@
    :testing-without-assertion {:evidence :corpus :note "node_rules_test"}
    :test-with-no-effect {:evidence :corpus :note "node_rules_test"}
    :banned-term {:evidence :corpus :note "dictionary_test"}
-   :unparseable {:evidence :corpus :note "not a rule: the file did not read"}})
+   :unparseable {:evidence :corpus :note "not a rule: the file did not read"}
+   ;; sift/interprocedural, reached through defnet's op=scan — not a node rule,
+   ;; but it emits, so it stands on a rung: none yet
+   :interprocedural-taint {:evidence :unjudged :note "21 on defnet, every one a CLI path from argv/env toward fs or sh; not yet read against the sources it names"}})
 
 (def registries
   "Every rule sift can emit, with its rung: the shape registry (shape, host
@@ -230,7 +233,9 @@
                  false switches unscoped-tenant-query off as vacuous
      :var-tags   {ns/name tag} — bin/oracle's :vars plus sift/var-tags
      :classes    bin/oracle's :classes — the host's own method, constructor
-                 and field table; typeflow judges overloads with it}
+                 and field table; typeflow judges overloads with it
+     :loaded     bin/oracle's loaded.edn — files the compiler compiled; a
+                 typeflow finding in any other file says :unjudged}
 
   -> {:ok? true
       :findings [f …]   every rule family, normalised — see `normalize`:
@@ -243,7 +248,7 @@
   or {:ok? false :error msg} when the source does not read. A consumer that
   wants one family filters on :family — :node :shape :complexity :prose —
   rather than calling four functions."
-  [{:keys [text path test? resolution prose var-tags classes tenanted?] :or {tenanted? true}}]
+  [{:keys [text path test? resolution prose var-tags classes loaded tenanted?] :or {tenanted? true}}]
   (let [{:keys [ok? nodes error]} (p/parse text)]
     (if-not ok?
       {:ok? false :error (or error "unparseable")}
@@ -272,7 +277,14 @@
                                          (assoc % :instruction "Hint the receiver or operands (^String s, ^long n), or cast (long x); the host compiler takes the slow path where the tag runs out.")))
                         ;; without bin/oracle's table the walker still runs, but what it
                         ;; says was not judged the way the :compiler rung means: say so
-                        (map #(if (and (nil? classes) (= :jvm (typeflow/host-of path))) (assoc % :evidence :unjudged :note "no oracle; run sift/bin/oracle in the project") %)))]
+                        (map #(cond (and (nil? classes) (= :jvm (typeflow/host-of path)))
+                                    (assoc % :evidence :unjudged :note "no oracle; run sift/bin/oracle in the project")
+                                    ;; the oracle exists but the compiler never loaded THIS file —
+                                    ;; sonar-clojure's 14 files that need the plugin's classpath — so
+                                    ;; nothing judged these; 200 of its 259 findings were this
+                                    (and loaded (not (some (fn [l] (or (str/ends-with? (str path) l) (str/ends-with? l (str path)))) loaded)))
+                                    (assoc % :evidence :unjudged :note "the oracle's compiler did not load this file")
+                                    :else %)))]
         {:ok? true
          :findings (vec (concat node shape over doc flow))
          ;; return types the walker can name for unhinted defns — defnet's

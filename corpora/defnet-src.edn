@@ -1,0 +1,8 @@
+;; defnet's OWN cljs source — a corpus the JS host must stay silent on: its
+;; release build has 0 :infer-warnings (13 :redef, all in defport). Every
+;; prediction here is a false positive, and that is the honest JS row.
+{:name "defnet-src"
+ :root "~/GitHub/defnet/src"
+ :oracle "~/.cache/sift/oracles/defnet"
+ ;; first score (2026-08-28): 573 predicted, 0 warned — P 0.00.
+ :role :held-out}

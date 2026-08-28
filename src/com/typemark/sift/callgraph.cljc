@@ -106,8 +106,13 @@
        :end-line (:end-line a) :end-col (:end-col a)
        ;; `str` rather than `format`: format is JVM-only, and this namespace
        ;; compiles to ClojureScript inside defnet.
+       ;; name the ends: the self-run on defnet gave 21 of these and not one
+       ;; said WHICH source or sink, so none could be judged from the message
+       :source (some-> (:callee a) (#(str (first %) "/" (second %))))
+       :sink (some-> (:callee (or b a)) (#(str (first %) "/" (second %))))
        :message (str (first caller) "/" (second caller)
-                     " obtains attacker-influenced data and passes it toward a sink")
+                     " obtains attacker-influenced data via " (some-> (:callee a) second)
+                     (when b (str " and passes it toward a sink via " (some-> (:callee b) second))))
        :flow (cond-> [{:line (:line a) :col (:col a)
                        :end-line (:end-line a) :end-col (:end-col a)
                        :message (if b

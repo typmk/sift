@@ -212,6 +212,11 @@
   resolve/for-file, so a call form's head resolves to the var it names."
   nil)
 
+(def ^:dynamic *ns-name*
+  "The namespace of the file being walked, so a bare `max-record-bytes`
+  finds its own file's entry in `*var-tags*` without kondo."
+  nil)
+
 (defn- var-return-tag
   "The tag a call to a user or library var returns, if the var carries one:
   through kondo's resolution when there is one, else an unqualified head
@@ -227,12 +232,10 @@
             (if (str/includes? hf "/")
               ;; spelled in full — clojure.java.io/file; an alias needs kondo
               (get *var-tags* hf)
-              (get *var-tags* (str "clojure.core/" hf))))))))
-
-(def ^:dynamic *ns-name*
-  "The namespace of the file being walked, so a bare `max-record-bytes`
-  finds its own file's entry in `*var-tags*` without kondo."
-  nil)
+              ;; an unqualified head is this namespace's own var first —
+              ;; (safe-factory) in sonar-clojure's junit.clj — then core's
+              (or (when *ns-name* (get *var-tags* (str *ns-name* "/" hf)))
+                  (get *var-tags* (str "clojure.core/" hf)))))))))
 
 (defn- resolved-var [c]
   (when *resolve* (get (:vars *resolve*) (pos-of c))))

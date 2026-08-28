@@ -171,7 +171,6 @@
     (is (= ids (set (map :rule fs))) "every rule in rules.edn fires")
     (is (= (count ids) (count fs)) "and exactly once")
     (is (= '(some (fn [x] (when (even? x) x)) xs) (:counterpart (by :first-filter-is-some))))
-    (is (= '(case k :a 1 :b 2 3) (:counterpart (by :cond-literals-with-else-is-case))))
     (is (nil? (:counterpart (by :thread-sleep))))
     (is (= 'a (get-in (by :deref-inside-own-swap) [:binds '?a])) ":inside carried ?a")
     (is (every? shape/applicability (map :applicability fs)))

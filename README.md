@@ -263,6 +263,18 @@ directory, lands the compiler's warnings as `:host/<kind>` labels through
 :compiled-only}` per definition — the falsifier as a graph fact, on
 defnet's own ladder: a note is `observed`, a prediction is `inferred`.
 
+**Run on itself** (`bin/sift lint --oracle ~/.cache/sift/oracles/sift
+src`, 2026-08-28): 78 findings — 56 `typeflow/boxed-math` at `:compiler`,
+and they are the 56 notes the JVM emits for this source, 0 either way;
+10 `cognitive-complexity` at `:parity` (`typeflow`'s `walk` is 223, the
+one function that carries the compiler's grammar; `tag-of` 57; pattern's
+`match-seq` 48); 9 `first-filter-is-some`; 2 `reflection-unwarned`
+(`parse.cljc`, `complexity.cljc`, one interop call each); 1
+`cond-as-case`. The run found two defects in the instrument: every
+complexity finding carried `:symbol nil` (the name was only in the
+message), and `cond-as-case` and a `rules.edn` row fired twice on
+`complexity.cljc:379` — one fact, one rule; the row is gone.
+
 **Four scripts.** `bin/oracle` (JVM: notes, loaded, tags, kondo),
 `bin/oracle-js` (Closure's extern names), `bin/validate` (the scorecard;
 it judges in-process — `falsify` is folded in; `--residue` prints the

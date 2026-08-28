@@ -56,16 +56,12 @@
   :message "(first (filter p xs)) walks no further than some does, and some says so"
   :instruction "Use (some (fn [x] (when (p x) x)) xs); a nil or false element is the one case first finds and some does not."}
 
- {:id :cond-literals-with-else-is-case
-  :evidence :corpus
-  :kind :rewrite
-  :match (cond (?? (= ?x ?k) ?e) ... :else ?d)
-  :when {?x :all-equal ?k :each-case-key ?e :at-least-2}
-  :emit (case ?x (?? ?k ?e) ... ?d)
-  :category :readability
-  :applicability :machine-applicable
-  :message "cond over literals of one value is case"
-  :instruction "Use case; keep the clause bodies, drop the (= x …) tests."}
+ ;; No cond->case rule here: cond_case.cljc covers it, with the two cases a
+ ;; pattern cannot say — no :else, and (= k x) either way round — and the
+ ;; nil default the counterpart needs. A data row for the :else case lived
+ ;; here as the demonstration of `(?? P Q) ...` and fired TWICE with it on
+ ;; sift's own complexity.cljc:379; one fact, one rule. The repetition
+ ;; syntax keeps its test in pattern_test.
 
  ;; No catch-all rule here: host.cljc's :catch-all-swallow covers it with
  ;; the class set and the constant-body test a pattern cannot say. One

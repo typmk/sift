@@ -7,7 +7,10 @@
 ;; not dump yet: `radius`, `strength`, `interpolator` on the viewer corpus
 ;; are deck.gl's and d3's own names, and typeflow still reports them.
 ;;
-;;   bin/externs [--project DIR --sources SRC] [closure-compiler.jar] > externs.edn
+;;   bin/oracle-js [--project DIR --sources SRC] [closure-compiler.jar] > externs.edn
+;;
+;; The JS half of bin/oracle: the JVM half runs where the project loads and
+;; needs its classpath; this reads a jar and needs nothing, so it is bb.
 ;;
 ;; Without a jar, the newest closure-compiler jar in ~/.m2. That alone is
 ;; the model: measured on the viewer at 92270f9^, P 0.84 R 1.00 (42 of 50).

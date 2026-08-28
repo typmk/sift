@@ -7,6 +7,7 @@
   fire, which a rule matching everything also does — so every rule gets
   both, and evidence.edn's :corpus rung for these rules means THIS file."
   (:require [clojure.test :refer [deftest is testing]]
+            [com.typemark.sift :as sift]
             [com.typemark.sift.access :as access]
             [com.typemark.sift.interop :as interop]
             [com.typemark.sift.parse :as parse]
@@ -112,12 +113,25 @@
 
 ;; --------------------------------------------------------------- interop
 
-(deftest jndi-injection
-  (testing "fires on the static form; the instance form needs the receiver's type, which the node rules do not have — the rule covers a shape, not the weakness"
-    (fires interop/findings "jndi-injection"
-           "(defn look [n] (javax.naming.InitialContext/doLookup n))"
-           "(defn look [] (javax.naming.InitialContext/doLookup \"java:comp/env\"))")
-    (is (empty? (rules interop/findings "(defn look [n] (.lookup ctx n))")))))
+(deftest jndi-injection-both-forms
+  ;; rules.edn now; the instance form needs the receiver's type, which the
+  ;; data engine reads from typeflow's annotated walk and the oracle's table
+  (let [table {:classes {"javax.naming.InitialContext" {:supers ["Context" "Object"] :ctors [{:params []}] :methods {"lookup" [{:params ["String"] :returns "Object"} {:params ["Name"] :returns "Object"}] "doLookup" [{:params ["String"] :returns "Object" :static? true}]}}
+                         "javax.naming.Context" {:supers ["Object"] :methods {"lookup" [{:params ["String"] :returns "Object"} {:params ["Name"] :returns "Object"}]}}}
+               :by-simple {"InitialContext" ["javax.naming.InitialContext"] "Context" ["javax.naming.Context"]}}
+        ids (fn [src] (set (map :rule (:findings (sift/analyze {:text src :path "x.clj" :classes table})))))]
+    (is (contains? (ids "(ns x (:import [javax.naming InitialContext]))\n(defn look [n] (InitialContext/doLookup n))") :jndi-injection) "static form, class through the import")
+    (is (not (contains? (ids "(ns x (:import [javax.naming InitialContext]))\n(defn look [] (InitialContext/doLookup \"java:comp/env\"))") :jndi-injection)) "a literal name")
+    (is (contains? (ids "(ns x (:import [javax.naming InitialContext]))\n(defn look [n] (.lookup (InitialContext.) n))") :jndi-injection) "instance form on a constructed context")
+    (is (contains? (ids "(ns x (:import [javax.naming Context]))\n(defn look [^Context ctx n] (.lookup ctx n))") :jndi-injection) "instance form on a hinted receiver")
+    (is (not (contains? (ids "(defn look [ctx n] (.lookup ctx n))") :jndi-injection)) "an untyped receiver: no claim, not a guess")))
+
+(deftest interop-detections-that-became-data
+  (let [ids (fn [src] (set (map :rule (:findings (sift/analyze {:text src :path "x.clj"})))))]
+    (is (contains? (ids "(ns x (:import [java.io ObjectInputStream]))\n(defn r [in] (ObjectInputStream. in))") :unsafe-deserialization))
+    (is (contains? (ids "(defn t [] (java.io.File/createTempFile \"a\" \"b\"))") :predictable-temp-file))
+    (is (contains? (ids "(defn p [c] (ProcessBuilder. c))") :shell-invocation) "java.lang needs no import")
+    (is (not (contains? (ids "(defn p [c] (str c))") :shell-invocation)))))
 
 ;; xml-external-entity's pair — parser built, hardening set or not — is in
 ;; interop_test; banned-term's is in dictionary_test; the credential,

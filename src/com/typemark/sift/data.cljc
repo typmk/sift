@@ -20,8 +20,9 @@
                     bindings, so `(deref ?a)` :inside `(swap! ?a ?&_)` is
                     the atom read inside its own swap. Positions come from the zipper
   node the form was read from; the match itself is over the sexpr."
-  (:require [com.typemark.sift.pattern :as pat]
-            [com.typemark.sift.zip :refer [collect inside-defn? pos-of sexpr]]
+  (:require [clojure.string :as str]
+            [com.typemark.sift.typeflow :as typeflow] [com.typemark.sift.pattern :as pat]
+            [com.typemark.sift.zip :refer [children collect inside-defn? peel pos-of sexpr]]
             #?(:clj  [com.typemark.sift.data-rules :refer [load-rules]]
                :cljs [com.typemark.sift.data-rules :refer-macros [load-rules]])
             [rewrite-clj.zip :as z]))
@@ -45,14 +46,68 @@
    :each-symbol   (fn [v] (and (vector? v) (every? symbol? v)))
    :at-least-2    (fn [v] (and (vector? v) (>= (count v) 2)))})
 
-(defn- guard-ok? [spec v]
+(def ^:dynamic *tags*
+  "{[line col] tag} from typeflow/tags for the file being scanned, so a
+  guard can ask what a bound form IS, not only what it looks like."
+  nil)
+
+(def ^:dynamic *classes* "bin/oracle's table, for :tag guards' supertypes." nil)
+
+(def ^:dynamic *imports* "{simple full} from the file's ns :import." {})
+
+(defn- guard-ok? [spec v pos]
   (cond
     (set? spec)     (contains? spec v)
-    (keyword? spec) (if-let [f (get guards spec)] (boolean (f v)) false)
+    (keyword? spec) (case spec
+                      ;; the bound form is computed — not a literal, not quoted
+                      :dynamic (not (or (keyword? v) (number? v) (string? v) (char? v) (nil? v) (boolean? v)
+                                        (and (seq? v) (= 'quote (first v)))))
+                      (if-let [f (get guards spec)] (boolean (f v)) false))
+    ;; {:tag "javax.naming.Context"} — the bound form's tag, by position, is
+    ;; that class or a subtype of it in the oracle's table. Without typeflow's
+    ;; tags or the table the guard is false: a rule that needs a type and has
+    ;; none says nothing rather than guessing
+    (map? spec)     (if-let [want (:tag spec)]
+                      (let [t (get *tags* pos)]
+                        (and (some? t) (typeflow/assignable-to? *classes* t want)))
+                      true)
     :else true))
 
-(defn- guards-ok? [{:keys [when]} binds]
-  (every? (fn [[v spec]] (guard-ok? spec (get binds v))) when))
+(defn- guards-ok?
+  "A guard on a variable this alternative did not bind is not a guard on
+  this match — (.lookup ?ctx ?n) binds ?ctx, (InitialContext/doLookup ?n)
+  does not, and one :when serves both."
+  [{:keys [when]} binds positions]
+  (every? (fn [[v spec]] (or (not (contains? binds v)) (guard-ok? spec (get binds v) (get positions v)))) when))
+
+(defn- bound-positions
+  "Which direct child of the matched form each variable bound — by sexpr
+  equality, first match — so a :tag guard can look its position up."
+  [zloc binds]
+  (let [kids (for [k (children zloc) :let [p (peel k)] :when p] [(sexpr p ::no) (pos-of p)])]
+    (into {} (for [[v form] binds
+                   :let [pos (some (fn [[f pos]] (when (= f form) pos)) kids)]
+                   :when pos]
+               [v pos]))))
+
+(defn- resolve-head
+  "A form whose head is Class/member or Class. with the class spelled by
+  its import — (InitialContext/doLookup n) under (:import [javax.naming
+  InitialContext]) — read as the full name, so a rule names the class
+  once, in full. Same for a ctor. Everything else unchanged."
+  [form]
+  (if (and (seq? form) (symbol? (first form)))
+    (let [h (first form) ns' (namespace h) nm (name h)]
+      (cond
+        (and ns' (get *imports* ns')) (cons (symbol (get *imports* ns') nm) (rest form))
+        ;; java.lang needs no import: (ProcessBuilder. c), (Thread/sleep n)
+        (and ns' (re-matches #"[A-Z][A-Za-z0-9_$]*" ns')) (cons (symbol (str "java.lang." ns') nm) (rest form))
+        (and (nil? ns') (str/ends-with? nm ".") (get *imports* (subs nm 0 (dec (count nm)))))
+        (cons (symbol (str (get *imports* (subs nm 0 (dec (count nm)))) ".")) (rest form))
+        (and (nil? ns') (re-matches #"[A-Z][A-Za-z0-9_$]*\." nm))
+        (cons (symbol (str "java.lang." nm)) (rest form))
+        :else form))
+    form))
 
 (defn- finding [file zloc {:keys [id kind emit category applicability message instruction] :as rule} binds]
   (let [[line col] (or (pos-of zloc) [nil nil])]
@@ -87,11 +142,12 @@
   "The FIRST rule that matches wins — one form, one finding. rules.edn is
   ordered specific before general for that reason."
   [file zloc form]
-  (some (fn [rule]
-          (when-let [binds (match-rule rule form zloc)]
-            (when (guards-ok? rule binds)
-              [(finding file zloc rule binds)])))
-        rules))
+  (let [form (resolve-head form)]
+    (some (fn [rule]
+            (when-let [binds (match-rule rule form zloc)]
+              (when (guards-ok? rule binds (bound-positions zloc binds))
+                [(finding file zloc rule binds)])))
+          rules)))
 
 (defn findings
   "Every data-rule finding under `zloc`, in document order."

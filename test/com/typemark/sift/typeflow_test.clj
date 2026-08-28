@@ -12,6 +12,7 @@
 (defn- at [src] (mapv (juxt :kind :column) (preds src)))
 (defn- kinds* [src opts] (mapv :kind (remove #(= :reflection-unwarned (:kind %)) (tf/predictions src "x.clj" :jvm opts))))
 (defn- at* [src opts] (mapv (juxt :kind :column) (remove #(= :reflection-unwarned (:kind %)) (tf/predictions src "x.clj" :jvm opts))))
+(defn- with [src opts] (kinds* src opts))
 
 (deftest the-file-rule-rides-beside-the-predictions
   (is (some #(= :reflection-unwarned (:kind %)) (tf/predictions "(defn f [s] (.length s))" "x.clj" :jvm)))
@@ -32,8 +33,10 @@
   (testing "a let binding carries its init's tag"
     (is (= [] (kinds "(defn f [x] (let [n (long x)] (inc n)))")))
     (is (= [:boxed-math] (kinds "(defn f [x] (let [n (first x)] (inc n)))"))))
-  (testing "a host member the table knows returns a primitive"
-    (is (= [] (kinds "(defn f [] (quot (System/currentTimeMillis) 1000))"))))
+  (testing "a host member the oracle knows returns a primitive; without the oracle it is known, unnamed, and boxes"
+    (is (= [] (with "(defn f [] (quot (System/currentTimeMillis) 1000))"
+                    {:classes {:classes {"java.lang.System" {:methods {"currentTimeMillis" [{:params [] :returns "long" :static? true}]}}} :by-simple {"System" ["java.lang.System"]}}})))
+    (is (= [:boxed-math] (kinds "(defn f [] (quot (System/currentTimeMillis) 1000))"))))
   (testing "bit ops warn on a boxed operand but return long — measured"
     (is (= [[:boxed-math 19]] (at "(defn f [x] (pos? (bit-and (parse-long x) 3)))"))
         "the bit-and boxes; pos? over its long does not"))
@@ -53,18 +56,21 @@
     (is (= [] (kinds "(defn f [u] (doto (java.util.Properties.) (.setProperty \"a\" u)))")))
     (is (= [[:reflection 27]] (at "(defn f [cfg u] (doto cfg (.setProperty \"a\" u)))"))
         "at the member form, on the unknown threaded receiver"))
-  (testing "an overloaded constructor with a boxed or unknown argument reflects — lume, measured"
+  (testing "an overloaded constructor with a boxed argument reflects — judged by the oracle's table, never by a hand list"
     (is (= #{:boxed-math :reflection}
-           (set (kinds "(defn f [ttl] (Date. (+ (System/currentTimeMillis) ttl)))"))))
+           (set (with "(ns x (:import [java.util Date]))\n(defn f [ttl] (Date. (+ (System/currentTimeMillis) ttl)))"
+                      {:classes {:classes {"java.util.Date" {:supers ["Object"] :ctors [{:params ["long"]} {:params ["String"]}] :methods {}}
+                                           "java.lang.System" {:methods {"currentTimeMillis" [{:params [] :returns "long" :static? true}]}}}
+                                 :by-simple {"Date" ["java.util.Date"] "System" ["java.lang.System"]}}}))))
+    (is (= [:boxed-math] (kinds "(defn f [ttl] (Date. (+ (System/currentTimeMillis) ttl)))"))
+        "without the table: the boxing is text, the constructor has no verdict")
     (is (= [] (kinds "(defn f [^String s] (java.util.UUID/fromString s))"))
-        "a static with one overload resolves by name and arity")))
+        "an undumped static is known, unnamed")))
 
 (deftest the-js-host-predicts-without-an-externs-set-too
   ;; the 648-vs-0 that once switched this host off was an empty oracle judging
   ;; a model; with no externs set every non-js member access is reported
   (is (= [:uninferred] (mapv :kind (remove #(= :reflection-unwarned (:kind %)) (tf/predictions "(defn f [x] (.foo x))" "x.cljs" :js))))))
-
-(defn- with [src opts] (kinds* src opts))
 
 (def classes
   "A slice of what bin/oracle dumps, enough for the assertions below —
@@ -87,7 +93,7 @@
    "ToolExecutionRequest" {:supers ["Object"] :ctors [] :methods {"name" [{:params [] :returns "String"}]}}
    "PersistentVector" {:supers ["List" "IPersistentVector" "Object"]}
    "IPersistentVector" {:supers ["Sequential" "Object"]}
-   "String" {:supers ["CharSequence" "Object"]}})
+   "String" {:supers ["CharSequence" "Object"] :methods {"indexOf" [{:params ["String"] :returns "int"} {:params ["int"] :returns "int"}]}}})
 (def dump
   "The tags.edn shape: classes by full name, reached by simple name."
   {:classes (into {} (map (fn [[k v]] [(str "x." k) v])) classes)
@@ -110,13 +116,10 @@
   (testing "a library's inc is not clojure.core/inc"
     (is (= [] (kinds "(defn f [r id v] (prometheus/inc r id v))")))
     (is (= [] (kinds "(defn f [r] (clojure.core/inc (long r)))"))))
-  (testing "a ^:const def is inlined as its literal — through var-tags over the file's own trees"
+  (testing "a ^:const def is inlined as its literal — the oracle's :vars carries its class"
     (let [src "(ns m)\n(def ^:const max-bytes 4096)\n(defn f [xs] (<= (count xs) max-bytes))"]
-      (is (= {"m/max-bytes" "long"} (tf/var-tags src)))
-      (is (= [] (kinds* src {:var-tags (tf/var-tags src)})))
-      (is (= [:boxed-math] (kinds src)) "without the tags a bare def is Object")))
-  (testing "^:private is not a return tag"
-    (is (= {} (tf/var-tags "(ns m)\n(defn ^:private f [x] x)"))))
+      (is (= [] (kinds* src {:var-tags {"m/max-bytes" "long"}})))
+      (is (= [:boxed-math] (kinds src)) "without the oracle a bare def is Object")))
   (testing "branches that agree carry their tag: if-let and cond rebinding a builder"
     (is (= [] (kinds "(defn f [x y] (let [b (java.util.Properties.) b (if-let [t x] (.setProperty b \"k\" t) b) b (cond y (.remove b y) :else b)] (.size b)))"))))
   (testing "a static field as an argument is known"
@@ -131,7 +134,8 @@
     (is (= [] (judged "(defn f [^java.net.HttpURLConnection c] (< (.getResponseCode c) 400))")))
     (is (= [:boxed-math :reflection] (kinds "(defn f [xs] (inc (.indexOf xs \"p\")))"))
         "agentia ledger.clj:296 — .indexOf is in :host-returns, and that only holds when it resolved")
-    (is (= [] (kinds "(defn f [^String xs] (inc (.indexOf xs \"p\")))"))))
+    (is (= [] (judged "(defn f [^String xs] (inc (.indexOf xs \"p\")))")))
+    (is (= [:boxed-math] (kinds "(defn f [^String xs] (inc (.indexOf xs \"p\")))")) "without the oracle the call is known, unnamed, and the inc boxes"))
   (testing "a static call the dump knows returns its primitive"
     (is (= [] (judged "(defn f [c] (- (Character/digit ^char c 10) 1))")))))
 
@@ -168,7 +172,8 @@
         "cond-> threads the builder into its member steps, so a local named like the step's argument is not the receiver"))
   (testing "doseq and for bind the element, which the compiler never types; :let inside them binds as let"
     (is (= [:reflection] (judged "(defn f [^java.io.File d] (doseq [x (.listFiles d)] (.isFile x)))")))
-    (is (= [] (judged "(defn f [ps] (for [p ps :let [f (clojure.java.io/file p)] :when (.exists f)] f))"))))
+    (is (= [] (kinds* "(defn f [ps] (for [p ps :let [f (clojure.java.io/file p)] :when (.exists f)] f))"
+                      {:var-tags {"clojure.java.io/file" "java.io.File"}}))))
   (testing "a reify method's parameters are typed by the interface"
     (is (= [] (judged "(defn f [] (reify ToolExecutor (execute [_ request _] (.name request))))")))
     (is (= [:reflection] (judged "(defn f [] (reify Unknown (execute [_ request _] (.name request))))"))))
@@ -248,4 +253,15 @@
     (is (= [] (js "(defn f [] (.-sameNs js/window))")))
     (is (= [] (js "(ns v (:require [\"d3\" :as d3]))\n(defn f [] (.-interpolateBlues d3))")) "a string-required alias is js")
     (is (= [] (js "(ns v (:require [\"d3\" :as d3]))\n(defn f [] (.interpolator (d3/scaleSequential)))")) "a call through the alias is a js value")))
+
+(deftest inferred-return-tags-are-the-producer-for-the-inferred-rung
+  (let [vt {"clojure.core/str" "java.lang.String"}]
+    (is (= [{:name "f" :line 2 :slot -1 :type "String"}]
+           (tf/inferred "(ns m)\n(defn f [x] (str x))" "m.clj" {:var-tags vt})))
+    (is (= [{:name "g" :line 2 :slot -1 :type "long"}] (tf/inferred "(ns m)\n(defn g [^long n] (inc n))" "m.clj")))
+    (is (= [] (tf/inferred "(ns m)\n(defn ^String h [x] (str x))" "m.clj" {:var-tags vt})) "a hinted return is declared, not inferred")
+    (is (= [] (tf/inferred "(ns m)\n(defn k [x] (first x))" "m.clj")) "Object is not a fact")
+    (is (= [{:name "m" :line 2 :slot -1 :type "String"} {:name "m" :line 2 :slot -1 :type "long"}]
+           (tf/inferred "(ns m)\n(defn m ([x] (str x)) ([^long a ^long b] (+ a b)))" "m.clj" {:var-tags vt}))
+        "arities that disagree are both returned — a conflict is a fact")))
 

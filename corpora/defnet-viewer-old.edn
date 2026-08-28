@@ -2,7 +2,7 @@
 ;; :in-sample was learned from, :held-out was judged after the rules were
 ;; written, :blind was never read before its first score was recorded.
 ;; JS: the oracle is a shadow-cljs release log (closure.log) plus Closure's
-;; extern property names (externs.edn, bin/externs). The sources are a git
+;; extern property names (externs.edn, bin/oracle-js). The sources are a git
 ;; worktree of defnet at 92270f9^, the last commit whose viewer still had
 ;; its 42 :infer-warnings.
 {:name "defnet-viewer-old"
@@ -11,5 +11,5 @@
  ;; first scores (2026-08-27): the pre-existing model, 262 predicted for 42
  ;; (P 0.16 R 1.00); with Closure's externs, 62 (P 0.68); with string-require
  ;; aliases as js, 50 (P 0.84 R 1.00) — where it stands. Adding npm property
- ;; names reclaimed the 8 and lost 14: recorded in bin/externs, not used.
+ ;; names reclaimed the 8 and lost 14: recorded in bin/oracle-js, not used.
  :role :held-out}

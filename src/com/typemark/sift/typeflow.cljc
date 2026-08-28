@@ -184,7 +184,7 @@
               :when (and nm (not= "&" nm))]
           [nm t])))
 
-(declare tag-of bind-env interop-kind receiver-known? defn-forms predictions* thread-tag)
+(declare tag-of bind-env interop-kind receiver-known? defn-forms predictions* thread-tag imports-of)
 
 (defn- arith-tag
   "primitive iff every operand is — except `/` over longs, which is
@@ -213,12 +213,21 @@
   nil)
 
 (defn- var-return-tag
-  "The tag a call to a user or library var returns, if kondo resolved the
-  call and the var carries one. The one step a text pass cannot take alone."
+  "The tag a call to a user or library var returns, if the var carries one:
+  through kondo's resolution when there is one, else an unqualified head
+  looked up in clojure.core — (str x) is a String without kondo, and a
+  local shadowing a core name is rare enough to be the resolver's job."
   [c]
-  (when (and *var-tags* *resolve*)
-    (when-let [qn (get (:vars *resolve*) (pos-of c))]
-      (get *var-tags* qn))))
+  (when *var-tags*
+    (or (when *resolve*
+          (when-let [qn (get (:vars *resolve*) (pos-of c))]
+            (get *var-tags* qn)))
+        (let [hf (head-full c)]
+          (when hf
+            (if (str/includes? hf "/")
+              ;; spelled in full — clojure.java.io/file; an alias needs kondo
+              (get *var-tags* hf)
+              (get *var-tags* (str "clojure.core/" hf))))))))
 
 (def ^:dynamic *ns-name*
   "The namespace of the file being walked, so a bare `max-record-bytes`
@@ -264,7 +273,7 @@
 
 (def ^:dynamic *externs*
   "The property names Closure's default externs already declare — a set,
-  from bin/externs. shadow-cljs's :infer-externs :auto warns for a member
+  from bin/oracle-js. shadow-cljs's :infer-externs :auto warns for a member
   access on an untyped target ONLY when the property is not among them:
   (.beginPath ctx) on an untyped ctx is silent because every browser extern
   has beginPath, and (.-sameNs d) is not. Measured on the viewer at 92270f9^:
@@ -307,6 +316,43 @@
               (str nm))))))
 
 (def ^:dynamic *js-aliases* #{})
+
+(def ^:dynamic *annotate*
+  "When set, predictions-in also emits one ::tag per list and symbol it
+  walks — see `tags`."
+  false)
+
+(declare predictions*)
+
+(defn tags
+  "{[line col] tag} for every list and symbol under every top-level form —
+  the tag environment typeflow computed, made addressable by position, so
+  a rule written as data can ask what a receiver is. `opts` as for
+  `predictions`. Untyped positions are present with nil."
+  ([text path] (tags text path nil))
+  ([text path {:keys [var-tags classes externs resolution]}]
+   (binding [*var-tags* var-tags *classes* classes *externs* externs *annotate* true
+             *resolve* (when resolution
+                         (some (fn [[k v]] (when (or (str/ends-with? (str path) k) (str/ends-with? k (str path))) v)) resolution))]
+     (into {} (for [p (predictions* text path (host-of path)) :when (= ::tag (:kind p))]
+                [[(:line p) (:column p)] (:tag p)])))))
+
+(defn imports
+  "{simple full} from a source's ns :import — public for data.cljc's head
+  resolution, so a rule names a class once, in full."
+  [text]
+  (imports-of (try (z/up (z/of-string text)) (catch #?(:clj Exception :cljs :default) _ nil))))
+
+(defn assignable-to?
+  "Is a value tagged `tag` assignable to class `target` by the oracle's
+  supertypes? Same simple name, or target among tag's dumped supers; an
+  undumped class answers false — a guard should not fire on a guess."
+  [classes tag target]
+  (binding [*classes* classes]
+    (boolean
+     (when (string? tag)
+       (or (= (simple-name tag) (simple-name target))
+           (some #{(simple-name target)} (:supers (class-entry tag))))))))
 
 (defn- imports-of
   "{simple full} from an ns form's :import clauses."
@@ -544,14 +590,7 @@
                    (static-return host (head-full c) (map #(tag-of host env %) args)))
               (let [j (static-return host (head-full c) (map #(tag-of host env %) args))]
                 (case (:status j) :resolved (:returns j) :reflect nil "host"))
-              ;; .indexOf is an int only when the call resolved; on an unknown
-              ;; receiver it reflects and returns Object (agentia ledger.clj:296)
-              (and (or (get-in hosts [host :host-returns (head-full c)])
-                       (get-in hosts [host :host-returns h]))
-                   (or (not (interop-kind host h))
-                       (some->> (second (children c)) (receiver-known? host env))))
-              (or (get-in hosts [host :host-returns (head-full c)])
-                  (get-in hosts [host :host-returns h]))
+              ;; an undumped static call is known, unnamed
               (some->> (head-full c) (re-find (re-pattern (get-in hosts [host :interop :static])))) "host"
               ;; (Foo. …) is a Foo — named, so an overloaded .m on it can be
               ;; judged — unless the constructor itself reflects, then Object
@@ -726,7 +765,7 @@
         math (get-in hosts [host :math])
         warns (get-in hosts [host :warns])
         emit! (fn [kind c detail]
-                (when (contains? warns kind)
+                (when (or (contains? warns kind) (= ::tag kind))
                   (let [[line col] (or (pos-of c) [nil nil])
                         ;; the compiler positions a #(…) at its `(`, one past
                         ;; the `#` rewrite-clj reports — measured against assay
@@ -748,6 +787,12 @@
                         env (vec-pairs (peel bvec)))))
             (walk [env c]
               (let [c (peel c)]
+                ;; the annotated tree: every list and symbol the walk reaches,
+                ;; with the tag the compiler would carry there — what a data
+                ;; rule's :tag guard reads (data.cljc), so a node rule can ask
+                ;; what a receiver is without a second walker
+                (when (and *annotate* c (or (z/list? c) (token-name c)))
+                  (emit! ::tag c {:tag (tag-of host env c)}))
                 (cond
                   (nil? c) nil
                   ;; a vector, map or set literal holds code — the first
@@ -903,9 +948,8 @@
                                   (when (= :reflect (:status j))
                                     (emit! :reflection c {:op h :interop :overload :receiver (some-> recv peel z/string) :tags (vec tags)})))))))
                         ;; a constructor or static call resolves an overload by
-                        ;; the compiler's own parameter matching, from the dump.
-                        ;; Without a dump, the hand table in hosts.edn :overloaded
-                        ;; and an untyped argument is the text-only guess.
+                        ;; the compiler's own parameter matching, from the dump;
+                        ;; without one there is no verdict, and no guess
                         (when (= host :jvm)
                           (let [hf (head-full c)
                                 tags (map #(tag-of host env %) (rest kids))
@@ -914,12 +958,7 @@
                                 j (cond ctor? (judge-ctor host (simple-name (subs hf 0 (dec (count hf)))) tags)
                                         static? (static-return host hf tags)
                                         :else nil)]
-                            (cond
-                              (= :reflect (:status j))
-                              (emit! :reflection c {:op h :interop :overload :tags (vec tags)})
-                              (and (nil? j) ctor? (nil? *classes*)
-                                   (contains? (get-in hosts [host :overloaded]) hf)
-                                   (some #(or (nil? %) (= "Number" %)) tags))
+                            (when (= :reflect (:status j))
                               (emit! :reflection c {:op h :interop :overload :tags (vec tags)}))))
                         (doseq [k kids] (walk env k))))))))]
       (walk env zloc)
@@ -931,48 +970,58 @@
 (defn- ns-name-of [zloc]
   (some->> (when zloc (collect zloc #(= "ns" (head-name %)))) first children second token-name))
 
-(defn- const-def?
-  "(def ^:const x …) — the compiler inlines the value at every use, so the
-  value's literal tag is the var's."
-  [nm]
-  (and (= :meta (z/tag nm))
-       (let [form (sexpr (first (children nm)) ::no)]
-         (or (= :const form) (and (map? form) (:const form))))))
-
-(defn- def-tags
-  "{\"ns/name\" tag} for `def`s whose name carries ^Tag, or ^:const with a
-  numeric, string or boolean literal. lume's trace.clj: (def ^:const
-  max-record-bytes 4096), compared against a count — long against int."
-  [host zloc ns-name]
-  (into {}
-        (for [d (collect zloc #(= "def" (head-name %)))
-              :let [[_ nm init] (children d)]
-              :when (and nm init (token-name nm))
-              :let [t (or (hint-of nm)
-                          (when (const-def? nm)
-                            (let [lt (literal-tag host init)]
-                              (when (string? lt) lt))))]
-              :when t]
-          [(str ns-name "/" (token-name nm)) t])))
-
 (defn var-tags
-  "{\"ns/name\" tag} for every defn in `text` whose name or first arglist
-  carries a ^Tag — the corpus's own return hints, to merge with
-  bin/var-tags' for libraries."
-  ([text] (var-tags text :jvm))
-  ([text host]
-   (let [zloc (try (z/up (z/of-string text {:track-position? true}))
-                   (catch #?(:clj Exception :cljs :default) _ nil))
-         ns-name (ns-name-of zloc)]
-     (if-not (and zloc ns-name)
-       {}
-       (into (def-tags host zloc ns-name)
-             (for [d (defn-forms zloc)
-                   :let [[_ nm & rest] (children d)
-                         argv (first (filter #(z/vector? (peel %)) rest))
-                         t (or (hint-of nm) (some-> argv hint-of))]
-                   :when (and (token-name nm) t)]
-               [(str ns-name "/" (token-name nm)) t]))))))
+  "RETIRED 2026-08-28: the oracle's :vars carries the corpus's own return
+  hints and ^:const literals (bin/oracle requires every namespace), and a
+  second reading of the same trees disagreed with it exactly where hints
+  were spelled unusually. Kept as an empty map so a caller written against
+  the old shape still merges."
+  ([_text] {})
+  ([_text _host] {}))
+
+(defn- return-tag
+  "What a defn body evaluates to, as the compiler carries it: the last form
+  of each arity under that arity's params. nil when unknown, when the tag
+  is known-but-unnamed, or when the arities disagree — a disagreement is a
+  fact for defnet's conflicts table, so both are returned."
+  [host d]
+  (let [kids (children d)
+        argv (first (filter #(z/vector? (peel %)) kids))
+        arities (if argv
+                  [[(peel argv) (last kids)]]
+                  (for [k kids :let [a (peel k)] :when (and (z/list? a) (some-> a children first peel z/vector?))]
+                    [(peel (first (children a))) (last (children a))]))]
+    (for [[av body] arities
+          :let [t (tag-of host (param-env av) body)]
+          :when (and (string? t) (not (contains? #{"host" "nil"} t)))]
+      (simple-name t))))
+
+(defn inferred
+  "{:name :line :slot -1 :type} per top-level defn whose return the walker
+  can name — the producer for defnet's :inferred rung, which had none. A
+  hinted return is DECLARED and the indexer's; only the unhinted ones are
+  inferred here. `opts` as for `predictions`."
+  ([text path] (inferred text path nil))
+  ([text path {:keys [var-tags classes externs resolution]}]
+   (let [host (host-of path)
+         zloc (try (z/up (z/of-string text {:track-position? true}))
+                   (catch #?(:clj Exception :cljs :default) _ nil))]
+     (if-not zloc
+       []
+       (binding [*var-tags* var-tags *classes* classes *externs* externs
+                 *resolve* (when resolution
+                             (some (fn [[k v]] (when (or (str/ends-with? (str path) k) (str/ends-with? k (str path))) v)) resolution))
+                 *ns-name* (ns-name-of zloc)
+                 *imports* (imports-of zloc)
+                 *js-aliases* (js-aliases-of zloc)]
+         (vec (for [d (->> (children zloc) (map peel) (filter #(and % (z/list? %) (contains? #{"defn" "defn-"} (head-name %)))))
+                    :let [[_ nm & rest] (children d)
+                          argv (first (filter #(z/vector? (peel %)) rest))
+                          declared? (or (hint-of nm) (some-> argv hint-of))
+                          [line _] (pos-of d)]
+                    :when (and (token-name nm) (not declared?))
+                    t (distinct (return-tag host d))]
+                {:name (token-name nm) :line line :slot -1 :type t})))))))
 
 (defn predictions
   "Source -> [{:kind :line :column :op :tags/:receiver :in \"name\"} …] for
@@ -984,6 +1033,7 @@
    (binding [*var-tags* var-tags
              *classes* classes
              *externs* externs
+             *annotate* false
              *resolve* (when resolution
                          (some (fn [[k v]] (when (or (str/ends-with? (str path) k) (str/ends-with? k (str path))) v)) resolution))]
      (predictions* text path host))))
@@ -1031,9 +1081,15 @@
   "The two host rules that are tag questions live here beside the compiler
   predictions — they need the same env. catch-all-swallow and
   mutable-escape are shape questions and stay in host.cljc."
-  {:js-prop-on-own-object {:category :warning
+  {:typeflow/boxed-math   {:category :warning :evidence :compiler
+                           :note "seven corpora agree with the compiler exactly, 3,351 notes; blind first scores clojure-mcp 79/79, darling 38/39, kora P 0.82 R 0.99 — bin/validate"}
+   :typeflow/reflection   {:category :warning :evidence :compiler
+                           :note "285 notes, all matched; blind first scores clojure-mcp P 0.92 R 0.75, darling P 0.85, kora P 0.71 R 0.88"}
+   :typeflow/uninferred   {:category :warning :evidence :compiler
+                           :note "viewer at defnet 92270f9^, 42 :infer-warnings: P 0.84 R 1.00 with Closure's externs; the 8 left are names shadow knows from a source not yet read"}
+   :js-prop-on-own-object {:category :warning :evidence :corpus :note "found render.cljs:367 shipped; corpus flag/clear"
                            :instruction "Read your own #js object with (aget obj \"k\"): #js writes a quoted key and .-k a renamable one, and :advanced renames one side."}
-   :reflection-unwarned   {:category :warning
+   :reflection-unwarned   {:category :warning :evidence :corpus
                            :instruction "Add (set! *warn-on-reflection* true) after the ns form so the compiler reports each reflective interop call."}})
 
 (defn findings

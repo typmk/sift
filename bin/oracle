@@ -77,8 +77,16 @@
                    (for [n nses
                          :let [ok (try (require n) true (catch Throwable _ false))]
                          :when ok
-                         [s v] (ns-publics n)
-                         :let [m (meta v) t (or (:tag m) (some-> (:arglists m) first meta :tag))]
+                         ;; ns-interns, not ns-publics: a defn- carries a return hint the
+                         ;; compiler reads exactly as a public one's — lume's private
+                         ;; builders were nine false reflections when only publics were dumped
+                         [s v] (ns-interns n)
+                         :let [m (meta v)
+                               t (or (:tag m) (some-> (:arglists m) first meta :tag)
+                                     ;; a ^:const var is inlined as its value: its class is its tag
+                                     (when (and (:const m) (bound? v))
+                                       (let [x @v] (cond (instance? Long x) 'long (instance? Double x) 'double
+                                                         (string? x) 'String (boolean? x) 'boolean :else nil))))]
                          :when t]
                      [(str n "/" s) (str (if (class? t) (.getName ^Class t) t))]))
         ;; classes: imports, hints, statics, ctors, plus the literal classes

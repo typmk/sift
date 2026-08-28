@@ -8,7 +8,8 @@
 ;;   :forbid    {:match pattern}                 — a form that should not
 ;;              appear; no counterpart, or a fixed one.
 ;;
-;; Every rule: :id (keyword), :kind, :category (Credo's :refactor
+;; Every rule: :id (keyword), :evidence (the rung — :corpus for a rule with
+;; its flag/clear pair; :note the measurement), :kind, :category (Credo's :refactor
 ;; :readability :design :warning :consistency), :applicability (clippy's
 ;; :machine-applicable :maybe-incorrect :has-placeholders :unspecified),
 ;; :message, :instruction. Optional :when {?v pred} where pred is a keyword
@@ -46,6 +47,7 @@
  ;; xs)), and the shorter rewrite would have returned true. maybe-incorrect
  ;; because a nil or false element is found by first and skipped by some.
  {:id :first-filter-is-some
+  :evidence :corpus :note "ten hits on defnet read; the first counterpart was wrong and retracted"
   :kind :rewrite
   :match (first (filter ?p ?xs))
   :emit (some (fn [x] (when (?p x) x)) ?xs)
@@ -55,6 +57,7 @@
   :instruction "Use (some (fn [x] (when (p x) x)) xs); a nil or false element is the one case first finds and some does not."}
 
  {:id :cond-literals-with-else-is-case
+  :evidence :corpus
   :kind :rewrite
   :match (cond (?? (= ?x ?k) ?e) ... :else ?d)
   :when {?x :all-equal ?k :each-case-key ?e :at-least-2}
@@ -76,6 +79,7 @@
  ;; argument form. :inside carries ?a, so a deref of a DIFFERENT atom is not
  ;; this.
  {:id :deref-inside-own-swap
+  :evidence :corpus :note "one on lume secrets.clj:285, a real lost update"
   :kind :forbid
   :either [(clojure.core/deref ?a) (deref ?a)]
   :inside (swap! ?a ?&_)
@@ -85,9 +89,52 @@
   :instruction "Inside (swap! a f), f receives the current value — use it. In the arguments, move the read into f: (swap! a update k merge …). A second @a may be older, and f may run more than once."}
 
  {:id :thread-sleep
+  :evidence :corpus
   :kind :forbid
   :either [(Thread/sleep ?&args) (java.lang.Thread/sleep ?&args)]
   :category :design
   :applicability :unspecified
   :message "Thread/sleep blocks a host thread"
-  :instruction "Schedule with a timer, a core.async timeout, or an executor; a blocked thread is a held resource."}]
+  :instruction "Schedule with a timer, a core.async timeout, or an executor; a blocked thread is a held resource."}
+ ;; ---- host interop, as data (moved from interop.cljc 2026-08-28) ----------
+ ;; Heads are FULL class names: the engine resolves (InitialContext/doLookup
+ ;; …) through the file's :import before matching. :dynamic — the bound
+ ;; argument is computed, not a literal. {:tag C} — the bound form's tag, by
+ ;; typeflow's annotated walk, is C or a subtype in the oracle's table; the
+ ;; instance form of jndi-injection needs it, and until 2026-08-28 the rule
+ ;; covered the static form only because no node rule could ask.
+ {:id :jndi-injection
+  :evidence :corpus :note "node_rules_test, both forms; the instance form through typeflow's tags"
+  :kind :forbid
+  :either [(javax.naming.InitialContext/doLookup ?n)
+           (.lookup ?ctx ?n)
+           (.doLookup ?ctx ?n)]
+  :when {?n :dynamic ?ctx {:tag "javax.naming.Context"}}
+  :category :warning
+  :applicability :unspecified
+  :message "JNDI lookup with a computed name"
+  :instruction "A caller-controlled JNDI name is remote code execution on older JDKs and information disclosure on new ones; look up a literal name, or validate against an allow-list first."}
+ {:id :unsafe-deserialization
+  :evidence :corpus :note "security_test / node_rules_test"
+  :kind :forbid
+  :either [(java.io.ObjectInputStream. ?&args) (java.beans.XMLDecoder. ?&args)]
+  :category :warning
+  :applicability :unspecified
+  :message "Java native deserialization"
+  :instruction "ObjectInputStream and XMLDecoder run the classes in the stream; use a data format, or an ObjectInputFilter with an allow-list."}
+ {:id :predictable-temp-file
+  :evidence :corpus :note "node_rules_test"
+  :kind :forbid
+  :match (java.io.File/createTempFile ?&args)
+  :category :warning
+  :applicability :unspecified
+  :message "File/createTempFile is predictable and world-readable by default"
+  :instruction "Use java.nio.file.Files/createTempFile, which sets owner-only permissions."}
+ {:id :shell-invocation
+  :evidence :corpus :note "node_rules_test; 0 hits on seven corpora"
+  :kind :forbid
+  :match (java.lang.ProcessBuilder. ?&args)
+  :category :warning
+  :applicability :unspecified
+  :message "process spawned — confirm no argument is caller-controlled"
+  :instruction "Pass the command as a literal vector and the untrusted part as an argument, never through a shell string."}]

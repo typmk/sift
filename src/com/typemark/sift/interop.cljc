@@ -71,16 +71,15 @@
   reading. These are two concerns that happen to sit near each other -- WHAT
   to detect, and HOW to describe it -- and they are already correctly
   separated."
-  [{:key "unsafe-deserialization" :class "java.io.ObjectInputStream" :member :new}
-   {:key "unsafe-deserialization" :class "java.beans.XMLDecoder" :member :new}
-   {:key "jndi-injection" :class "javax.naming.InitialContext" :member "doLookup" :dynamic true}
-   {:key "jndi-injection" :class "javax.naming.Context" :member "lookup" :dynamic true}
-   {:key "predictable-temp-file" :class "java.io.File" :member "createTempFile"}
-   {:key "xml-external-entity" :class "javax.xml.parsers.DocumentBuilderFactory" :member "newInstance"}
+  ;; jndi-injection, unsafe-deserialization, predictable-temp-file and
+  ;; shell-invocation (ProcessBuilder) are rules.edn's now — data rules with
+  ;; :dynamic and :tag guards over typeflow's annotated walk, which is how
+  ;; the instance form (.lookup ctx n) became detectable. What stays here is
+  ;; what needs the hardening walk.
+  [{:key "xml-external-entity" :class "javax.xml.parsers.DocumentBuilderFactory" :member "newInstance"}
    {:key "xml-external-entity" :class "javax.xml.parsers.SAXParserFactory" :member "newInstance"}
    {:key "xml-external-entity" :class "javax.xml.transform.TransformerFactory" :member "newInstance"}
-   {:key "xml-external-entity" :class "javax.xml.stream.XMLInputFactory" :member "newInstance"}
-   {:key "shell-invocation" :class "java.lang.ProcessBuilder" :member :new}])
+   {:key "xml-external-entity" :class "javax.xml.stream.XMLInputFactory" :member "newInstance"}])
 
 (def ^:private by-target
   (reduce (fn [m r] (update m [(:class r) (:member r)] (fnil conj []) r)) {} detections))

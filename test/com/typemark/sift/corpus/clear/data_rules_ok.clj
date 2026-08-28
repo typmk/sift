@@ -16,3 +16,7 @@
 (defn m [k] (cond (= k :a) 1 (= j :b) 2 :else 3))
 (defn n [a b x] (swap! a (fn [v] (conj v (count @b) x))))
 (defn o [a] (let [v @a] (swap! a conj v)))
+
+;; a literal JNDI name, a nio temp file, a data format
+(defn look [] (javax.naming.InitialContext/doLookup "java:comp/env"))
+(defn t [] (java.nio.file.Files/createTempFile "a" "b" (into-array java.nio.file.attribute.FileAttribute [])))

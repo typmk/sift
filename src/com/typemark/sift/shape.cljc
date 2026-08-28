@@ -34,17 +34,21 @@
   an agent is handed. A registry, not a set, so this is where a rule's
   metadata lives and a rule file is only its matcher and counterpart."
   (merge
-  {fold/rule      {:category :refactor :instruction fold/instruction}
-   map-loop/rule  {:category :refactor :instruction map-loop/instruction}
-   loop-fold/rule {:category :refactor :instruction loop-fold/instruction}
-   cond-case/rule {:category :readability :instruction cond-case/instruction}
+  ;; :evidence is the rung the rule stands on — :compiler, :parity, :corpus,
+  ;; :read, :unjudged — and :note the measurement. It lives HERE, on the
+  ;; entry, so a rule cannot exist without saying what it rests on; the
+  ;; suite fails on an entry without one.
+  {fold/rule      {:category :refactor :instruction fold/instruction :evidence :corpus :note "17/17 with the standalone CLI on defnet"}
+   map-loop/rule  {:category :refactor :instruction map-loop/instruction :evidence :corpus}
+   loop-fold/rule {:category :refactor :instruction loop-fold/instruction :evidence :corpus :note "0 on hand-written code, 1 in clojure.core — fires on generated code"}
+   cond-case/rule {:category :readability :instruction cond-case/instruction :evidence :corpus :note "1 on defnet, 7 in clojure.core, all read"}
    ;; the host boundary — see host.cljc
-   :catch-all-swallow     (:catch-all-swallow host/rules)
-   :mutable-escape        (:mutable-escape host/rules)
-   :js-prop-on-own-object (:js-prop-on-own-object typeflow/rules)
-   :reflection-unwarned   (:reflection-unwarned typeflow/rules)}
-  ;; rules.edn — each carries its own category and instruction
-  (into {} (map (fn [{:keys [id category instruction]}] [id {:category category :instruction instruction}])) data/rules)))
+   :catch-all-swallow     (assoc (:catch-all-swallow host/rules) :evidence :corpus :note "65 on defnet, this repo's every-failure-is-a-value style; baseline them")
+   :mutable-escape        (assoc (:mutable-escape host/rules) :evidence :corpus)
+   :js-prop-on-own-object (assoc (:js-prop-on-own-object typeflow/rules) :evidence :corpus :note "found render.cljs:367 shipped; corpus flag/clear")
+   :reflection-unwarned   (assoc (:reflection-unwarned typeflow/rules) :evidence :corpus)}
+  ;; rules.edn — each carries its own category, instruction and evidence
+  (into {} (map (fn [{:keys [id category instruction evidence note]}] [id (cond-> {:category category :instruction instruction :evidence (or evidence :unjudged)} note (assoc :note note))])) data/rules)))
 
 (def applicability
   "clippy's four rungs, so an editor knows what it may apply unasked:

@@ -25,6 +25,7 @@
   (:require #?(:clj  [com.typemark.sift.data-rules :refer [load-edn]]
                :cljs [com.typemark.sift.data-rules :refer-macros [load-edn]]) [clojure.string :as str]
             [com.typemark.sift.access :as access]
+            [com.typemark.sift.data :as data]
             [com.typemark.sift.analysis :as analysis]
             [com.typemark.sift.callgraph :as callgraph]
             [com.typemark.sift.complexity :as complexity]
@@ -140,17 +141,52 @@
 
 ;; ── one entry point ────────────────────────────────────────────────────────
 
-(def evidence
-  "evidence.edn — what every rule's verdict rests on, as data. See the file."
-  (load-edn "evidence.edn"))
+(def node-rules-registry
+  "The node-stream rules — strings in their namespaces, so their category,
+  rung and measurement live here. :read means every hit on lume, sift and
+  agentia was read at its line on 2026-08-27; :corpus means a flag/clear pair
+  in node_rules_test, security_test, interop_test or dictionary_test. A pair
+  proves a rule fires and stays silent; it does not say how it does on real
+  code, and 0 hits on seven corpora is not evidence either way."
+  {:permissive-file-permissions {:evidence :read :note "4/4 wrong (HTTP status keys); fixed — a call argument under a mode-setting head"}
+   :hardcoded-credential {:evidence :read :note "4/4 wrong (*-secret-type slugs); fixed — a name ending -type/-kind names a kind"}
+   :unscoped-tenant-query {:evidence :read :note "43 on lume unjudgeable without the data model; 5/5 wrong on agentia, now vacuous where the corpus names no tenant"}
+   :ambiguous-owner-check {:evidence :read :note "8 on lume, unjudged: needs the data model"}
+   :csrf-protection-absent {:evidence :read :note "2 on lume, token-authenticated routes; the :delete-as-argument hits fixed"}
+   :side-effect-in-swap {:evidence :read :note "1 on lume, the CAS-with-a-decision idiom; fixed"}
+   :xml-external-entity {:evidence :corpus :note "interop_test, hardened and not"}
+   :operator-as-party {:evidence :corpus :note "node_rules_test; lume-specific by construction"}
+   :discarded-future {:evidence :corpus :note "security_test"}
+   :trust-all-certificates {:evidence :corpus :note "security_test"}
+   :redos-vulnerable-regex {:evidence :corpus :note "node_rules_test; measured 0/11 true positives once, before the brace-nesting rule"}
+   :partial-match-validation {:evidence :corpus :note "node_rules_test"}
+   :cookie-missing-security-flags {:evidence :corpus :note "node_rules_test"}
+   :sensitive-data-logged {:evidence :corpus :note "node_rules_test"}
+   :xss-unescaped-output {:evidence :corpus :note "node_rules_test"}
+   :empty-test {:evidence :corpus :note "node_rules_test"}
+   :testing-without-assertion {:evidence :corpus :note "node_rules_test"}
+   :test-with-no-effect {:evidence :corpus :note "node_rules_test"}
+   :banned-term {:evidence :corpus :note "dictionary_test"}
+   :unparseable {:evidence :corpus :note "not a rule: the file did not read"}})
+
+(def registries
+  "Every rule sift can emit, with its rung: the shape registry (shape, host
+  and data rules), prose, typeflow's predictions, complexity, and the node
+  rules above. `evidence` is what a reader of the README, the CLI or a
+  finding gets; one place per rule."
+  (delay (merge typeflow/rules prose/rules node-rules-registry shape/rules
+                {:cognitive-complexity {:evidence :parity :note "5,519/5,531 units vs cccc on defnet; Spearman 0.989 vs SonarJS on LightTable"}})))
+
+(defn evidence
+  "{rule {:evidence rung :note …}} over every registry — the ledger, derived."
+  []
+  (into {} (map (fn [[k v]] [k (select-keys v [:evidence :note])])) @registries))
 
 (defn evidence-of
-  "The rung a rule stands on: its own entry, else its family's, else
-  :unjudged — which is what an unlisted rule IS."
-  [rule family]
-  (or (get-in evidence [:rules rule :evidence])
-      (get-in evidence [:families family])
-      :unjudged))
+  "The rung a rule stands on, from its registry entry; :unjudged when the
+  entry has none — which is what an unlisted rule IS."
+  [rule _family]
+  (or (get-in @registries [rule :evidence]) :unjudged))
 
 (defn- normalize
   "Every finding, whatever produced it, in one shape: a keyword :rule, a
@@ -200,6 +236,8 @@
       :findings [f …]   every rule family, normalised — see `normalize`:
                         :node :shape :complexity :prose :typeflow
       :units    [u …]   per-unit complexity, nested units as :children
+      :inferred [{:name :line :slot -1 :type} …]  return tags inferred for
+                        unhinted defns (typeflow/inferred)
       :seeds    {…}     this file's taint sources and sinks, for
                         `interprocedural`}
   or {:ok? false :error msg} when the source does not read. A consumer that
@@ -214,7 +252,13 @@
                                  x (if (= f access/findings) (f nodes :tenanted? tenanted?) (f nodes))]
                              (normalize :node cat x))
                            (when test? (map #(normalize :node :design %) (tests/findings nodes))))
-            shape  (map #(normalize :shape :refactor %) (shape/findings text path resolution))
+            ;; the data engine reads typeflow's tag environment and the oracle's
+            ;; table, so a rule as data can ask what a receiver is
+            shape  (binding [data/*tags* (when (= :jvm (typeflow/host-of path))
+                                           (typeflow/tags text path {:var-tags var-tags :classes classes :resolution resolution}))
+                             data/*classes* classes
+                             data/*imports* (typeflow/imports text)]
+                     (doall (map #(normalize :shape :refactor %) (shape/findings text path resolution))))
             cx     (complexity/report text path)
             over   (map #(normalize :complexity :refactor
                                     (assoc % :category :refactor
@@ -225,9 +269,15 @@
                         ;; the two host rules already arrive via shape/findings
                         (remove #(contains? #{:js-prop-on-own-object :reflection-unwarned} (:rule %)))
                         (map #(normalize :typeflow :warning
-                                         (assoc % :instruction "Hint the receiver or operands (^String s, ^long n), or cast (long x); the host compiler takes the slow path where the tag runs out."))))]
+                                         (assoc % :instruction "Hint the receiver or operands (^String s, ^long n), or cast (long x); the host compiler takes the slow path where the tag runs out.")))
+                        ;; without bin/oracle's table the walker still runs, but what it
+                        ;; says was not judged the way the :compiler rung means: say so
+                        (map #(if (and (nil? classes) (= :jvm (typeflow/host-of path))) (assoc % :evidence :unjudged :note "no oracle; run sift/bin/oracle in the project") %)))]
         {:ok? true
          :findings (vec (concat node shape over doc flow))
+         ;; return types the walker can name for unhinted defns — defnet's
+         ;; :inferred rung, which had no producer
+         :inferred (typeflow/inferred text path {:var-tags var-tags :classes classes :resolution resolution})
          :units (if (:ok? cx) (:functions cx) [])
          :seeds (security/seeds nodes)}))))
 

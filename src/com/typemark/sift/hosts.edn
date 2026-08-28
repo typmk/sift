@@ -36,23 +36,17 @@
                          "Number" "Number" "Fn" "AFunction" "js-literal" "Object"}
        :casts {"long" "long" "int" "int" "double" "double" "float" "float"
                "short" "short" "byte" "byte" "char" "char" "boolean" "boolean"}
-       ;; What the JVM compiler knows a core call returns: :inline forms (count,
-       ;; not, the predicates, the math) and vars carrying ^Tag (str, name,
-       ;; subs, keyword, symbol, clojure.java.io). NOT vec, vector, list, assoc,
-       ;; hash-map, first, nth, get, partial, comp: those are plain invokes and
-       ;; return Object — (.messages b (list …)) reflected on clojure-mcp while
-       ;; this table said :list. bin/oracle's :vars is the same fact, live.
-       :core {"str" "String" "name" "String" "namespace" "String" "subs" "String"
-              "count" "int" "alength" "int" "keyword" "Keyword" "symbol" "Symbol"
+       ;; ONLY what the compiler knows WITHOUT reading a var: :inline forms and
+       ;; special forms — count, alength, not, the predicates, the math, the
+       ;; casts, fn. Everything a var carries (str, name, io/file) is in the
+       ;; oracle's :vars, read live; a hand copy of it was wrong four times
+       ;; before it was deleted (vec, list, keyword, Math/abs).
+       :core {"count" "int" "alength" "int"
+              ;; the array constructors are :inline to Numbers.*_array — typed
+              ;; by the static call, not by a var
               "char-array" "char[]" "byte-array" "byte[]" "int-array" "int[]" "long-array" "long[]"
               "double-array" "double[]" "boolean-array" "boolean[]" "object-array" "Object[]"
               "fn" "AFunction" "fn*" "AFunction"
-              ;; clojure.java.io carries return hints the compiler reads; keyed
-              ;; by name because `head*` is the unqualified name (io/file -> file)
-              "file" "java.io.File" "reader" "java.io.Reader" "writer" "java.io.Writer"
-              "input-stream" "java.io.InputStream" "output-stream" "java.io.OutputStream"
-              "as-file" "java.io.File" "as-url" "java.net.URL"
-              "atom" "Atom" "class" "Class"
               "boolean" "boolean" "not" "boolean" "nil?" "boolean" "some?" "boolean"
               "empty?" "boolean" "seq?" "boolean" "map?" "boolean" "vector?" "boolean"
               "string?" "boolean" "number?" "boolean" "keyword?" "boolean"
@@ -78,48 +72,6 @@
        :inline-arities {"mod" #{} "<" #{2} ">" #{2} "<=" #{2} ">=" #{2} "==" #{2}
                         "max" :two-or-more "min" :two-or-more
                         "+" :two-or-more "*" :two-or-more "/" :two-or-more "-" :one-or-more}
-       ;; host members whose result the compiler knows to be primitive, so
-       ;; math over them is unboxed: (quot (System/currentTimeMillis) 1000)
-       ;; was a false positive on lume until this existed. Short list, on
-       ;; purpose — what a corpus showed, not the JDK.
-       :host-returns {"System/currentTimeMillis" "long" "System/nanoTime" "long"
-                      "Math/abs" "double" "Math/floor" "double" "Math/ceil" "double" "Math/round" "long"
-                      "Math/max" "double" "Math/min" "double" "Math/pow" "double" "Math/sqrt" "double"
-                      "Integer/parseInt" "int" "Long/parseLong" "long" "Double/parseDouble" "double"
-                      ".indexOf" "int" ".lastIndexOf" "int" ".length" "int" ".size" "int"
-                      ".count" "int" ".compareTo" "int" ".hashCode" "int" ".intValue" "int"
-                      ".longValue" "long" ".doubleValue" "double" ".isEmpty" "boolean"
-                      ".equals" "boolean" ".contains" "boolean" ".startsWith" "boolean"
-                      ".endsWith" "boolean" ".exists" "boolean" ".isDirectory" "boolean"
-                      ".isFile" "boolean" ".toString" "String" ".getName" "String"
-                      ".getMessage" "String" ".getPath" "String" ".trim" "String"}
-       ;; constructors and statics with OVERLOADS on an argument position, so
-       ;; an untyped argument is a reflective call. Everything else resolves
-       ;; by name and arity alone; predicting on every static with an Object
-       ;; argument measured 73 false positives on lume (Pattern/quote,
-       ;; UUID/fromString, System/getenv). A JVM oracle could grow this from
-       ;; assay's :refused lists; the list is what corpora showed.
-       :overloaded #{"Date." "String." "StringBuilder." "OutputStreamWriter." "InputStreamReader."
-                     "File." "URI." "URL." "BigDecimal." "BigInteger." "Thread." "Integer." "Long." "Double."
-                     "java.util.Date." "java.io.File." "java.net.URI."
-                     "URLDecoder/decode" "URLEncoder/encode" "java.net.URLDecoder/decode" "java.net.URLEncoder/encode"
-                     ;; NOT Integer/parseInt or Long/parseLong: their overloads differ
-                     ;; by ARITY, and arity resolves without types — lume, measured
-                     "String/valueOf" "Integer/valueOf" "Long/valueOf" "Double/valueOf"
-                     "Math/abs" "Math/max" "Math/min" "Math/round"
-                     "String/format" "Arrays/asList" "Collections/sort"}
-       ;; occurrence typing (Tobin-Hochstadt & Felleisen 2010): a predicate in
-       ;; test position narrows its argument in the then-branch. Classes, not
-       ;; primitives — (number? x) does not unbox x, so boxed-math is unmoved;
-       ;; reflection on (.length s) after (string? s) is not.
-       ;; RETRACTED 2026-08-27: the compiler never narrows a local on a predicate
-       ;; (kora.core tokens.cljc, measured). Kept as the record; typeflow ignores it.
-       :narrows {"string?" "String" "keyword?" "Keyword" "symbol?" "Symbol"
-                 "map?" :map "vector?" :vector "set?" :set "seq?" :seq "coll?" :collection
-                 "fn?" "Fn" "ifn?" "IFn" "char?" "Character" "boolean?" "Boolean"
-                 "number?" "Number" "integer?" "Long" "int?" "Long" "double?" "Double"
-                 "inst?" "java.util.Date" "uuid?" "java.util.UUID" "uri?" "java.net.URI"
-                 "bytes?" "bytes"}
        :math #{"+" "-" "*" "/" "inc" "dec" "quot" "rem" "mod" "max" "min"
                "<" ">" "<=" ">=" "==" "zero?" "pos?" "neg?"
                "bit-and" "bit-or" "bit-xor" "bit-not" "bit-shift-left" "bit-shift-right" "unsigned-bit-shift-right"
@@ -145,7 +97,7 @@
        ;; cljs.analyzer/analyze-dot warns :infer-warning when the target's
        ;; inferred tag is nil or any; shadow-cljs's :infer-externs :auto then
        ;; keeps only the properties Closure's default externs do not already
-       ;; declare (typeflow/*externs*, from bin/externs). The 648-vs-0 that
+       ;; declare (typeflow/*externs*, from bin/oracle-js). The 648-vs-0 that
        ;; switched this host off was an EMPTY oracle — defnet's source was
        ;; already clean — judging a model; the viewer at 92270f9^ has 42.
        :warns #{:uninferred}}}

@@ -32,11 +32,10 @@
 (deftest catches-the-jdk-misuse-clojure-inherits
   ;; weak-hash, cipher, TLS and insecure-random moved to clj-kondo hooks,
   ;; which resolve the var instead of matching its name. See hooks_test.
-  (is (contains? (rules-for (str ns-form "(ObjectInputStream. in)")) "unsafe-deserialization"))
+  
   (is (contains? (rules-for (str ns-form "(DocumentBuilderFactory/newInstance)"))
                  "xml-external-entity"))
-  (is (contains? (rules-for "(java.io.File/createTempFile \"a\" \"b\")")
-                 "predictable-temp-file")))
+  )
 
 (deftest does-not-fire-on-the-safe-call
   (testing "commented-out code is not a finding"

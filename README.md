@@ -173,7 +173,7 @@ false positive on real code first, and every one is a test.
 | clojure-mcp (74 files, 517 notes) | boxed 79/79 · reflection **P 0.92 R 0.75** | boxed **79 / 79**, reflection **211 / 211** |
 | darling-toolkit (29 files, 71 notes) | boxed 38/39 · reflection **P 0.85 R 0.85** | boxed **39 / 39**, reflection **20 / 20** |
 | kora.core (22 files, 3,080 notes) | boxed **P 0.82 R 0.99** · reflection **P 0.71 R 0.88** | boxed **3,055 / 3,055**, reflection **25 / 25** |
-| defnet viewer at `92270f9^` (JS, 42 Closure warnings) | P 0.16 R 1.00 | **P 0.84 R 1.00** (42 / 50) — Closure's externs, `bin/externs` |
+| defnet viewer at `92270f9^` (JS, 42 Closure warnings) | P 0.16 R 1.00 | **P 0.84 R 1.00** (42 / 50) — Closure's externs, `bin/oracle-js` |
 
 **The forecasts are the "first score" column** — each taken before a line
 of that corpus was read. Everything in "now" is a fit. What the three
@@ -202,7 +202,7 @@ a model. The viewer at `92270f9^`, the last commit before its 42
 a worktree). `cljs.analyzer/analyze-dot` warns when the target's inferred
 tag is `nil` or `any`; shadow-cljs's `:infer-externs :auto` then keeps only
 the properties Closure's default externs do not declare — `beginPath` on an
-untyped `ctx` is silent, `sameNs` is not. `bin/externs` dumps that set
+untyped `ctx` is silent, `sameNs` is not. `bin/oracle-js` dumps that set
 (6,634 names) from the Closure jar; string-required aliases (`["d3" :as
 d3]`, `:refer [Graph]`) are `js`. P 0.16 → 0.68 → **0.84, R 1.00**. The 8
 false positives left (`radius`, `strength`, `x0`, `y0`, `leaves`,
@@ -210,22 +210,63 @@ false positives left (`radius`, `strength`, `x0`, `y0`, `leaves`,
 not: adding every property name from the npm sources the build requires
 reclaimed those 8 and LOST 14 true ones (`zoomIn`, `setProps`,
 `sourcePosition` — all in npm sources too), so that theory is wrong and
-`bin/externs --sources` stays only as its record. What separates the two
+`bin/oracle-js --sources` stays only as its record. What separates the two
 sets is in shadow's own source, which is AOT-only in the local jar and
 was not read.
 
-**Two traversal kits, and the decision to keep both.** The node families
-(security, interop, concurrency, regex, web, access, tests — 960 lines)
-walk `parse.cljc`'s flat node stream through eight `tree.cljc` helpers
-(130 lines); shape, data and typeflow walk the rewrite-clj zipper through
-`zip.cljc`. Porting the seven onto the zipper would delete 130 lines and
-rewrite 960 against a gate of forty flag/clear pairs and 68 real-code hits
-— and sonar-clojure's sensor needs the node stream anyway for line data
-and CPD. Not this round, and the reason is the ratio. What the split does
-cost is capability, not lines: a node rule cannot ask typeflow's
-environment what a receiver is, which is why `jndi-injection` covers the
-static form only. Letting node rules query the tag environment is the
-consolidation worth making, when a rule needs it.
+**The annotated walk, and rules that ask what a receiver is.** The two
+traversal kits stay — 130 lines of `tree.cljc` against a 960-line port, and
+sonar's sensor needs the node stream for line data and CPD — but the cost
+that mattered is gone: `typeflow/tags` is the walk's tag environment made
+addressable by position, and the data engine reads it. A rule in
+`rules.edn` may now guard a bound form with `{:tag "javax.naming.Context"}`
+(the form's tag is that class or a subtype in the oracle's table) or
+`:dynamic` (computed, not a literal), and its head names a class in full —
+`(InitialContext/doLookup n)` is resolved through the file's `:import`
+before matching, `(ProcessBuilder. c)` through `java.lang`. Four of
+`interop.cljc`'s detections became four rows: `jndi-injection` covers the
+instance form `(.lookup ctx n)` for the first time, and only when `ctx`'s
+tag is known — an untyped receiver is no claim, not a guess. What stays in
+code is what needs a walk of its own (the XML hardening scan, the
+`reify`d TrustManager).
+
+**The oracle is the architecture.** `hosts.edn` no longer carries a hand
+copy of the JDK: `:core` is only what the compiler knows without reading a
+var — the `:inline` forms, the casts, the array constructors — and
+`:host-returns` and `:overloaded` are deleted. Each had been wrong at least
+once before the dump corrected it (`vec`, `keyword`, `Math/abs`, `URL.`).
+The tree-read `var-tags` is retired too: `bin/oracle` dumps every interned
+var's return hint, `defn-` included (`ns-publics` had dropped those, and
+nine of lume's builders came back as false reflections until it was
+`ns-interns`), and `^:const` literals as their class. A typeflow finding
+produced without an oracle says `:evidence :unjudged` on the finding
+itself.
+
+**Evidence lives on the rule.** `evidence.edn` is gone; every registry
+entry — shape, data, prose, typeflow, complexity, and a registry for the
+node rules — carries `:evidence` and `:note`, `load-rules` refuses a
+`rules.edn` row without a rung, and `sift/evidence` derives the ledger.
+`bin/validate` prints it: compiler 3 · parity 1 · corpus 35 · read 6 ·
+**unjudged 0**.
+
+**The `:inferred` rung has a producer.** `typeflow/inferred` names the
+return type of every unhinted `defn` the walk can type; `sift/analyze`
+returns it as `:inferred`, and defnet's `op=scan` writes it to the type-fact
+table at source `:inferred` — the rung the whole ladder was designed
+around and nothing had ever filled. Two arities that disagree are two
+facts; `conflicts` reports them.
+
+**One op lands prediction and compilation together.** `op=scan
+file=<oracle dir>` now reads `notes.edn` / `closure.log` from the same
+directory, lands the compiler's warnings as `:host/<kind>` labels through
+`hostwarn`'s reader, and reports `:agreement {:both :predicted-only
+:compiled-only}` per definition — the falsifier as a graph fact, on
+defnet's own ladder: a note is `observed`, a prediction is `inferred`.
+
+**Four scripts.** `bin/oracle` (JVM: notes, loaded, tags, kondo),
+`bin/oracle-js` (Closure's extern names), `bin/validate` (the scorecard;
+it judges in-process — `falsify` is folded in; `--residue` prints the
+misses), `bin/sift`.
 
 **Text alone is not the claim any more.** Without `bin/oracle`'s table the
 walker still runs — hints, literals, casts, `hosts.edn`'s short core and

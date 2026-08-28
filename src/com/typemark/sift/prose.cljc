@@ -29,15 +29,15 @@
             [com.typemark.sift.json :as json]))
 
 (def rules
-  {:doc/restates-name  {:category :readability
+  {:doc/restates-name  {:evidence :corpus :note "7 on defnet, all real" :category :readability
                         :instruction "Say what the function guarantees or returns, not its name again: the input's shape, the edge case, what nil means."}
-   :doc/hedge          {:category :readability
+   :doc/hedge          {:evidence :corpus :category :readability
                         :instruction "Delete the hedge. A docstring is the contract; 'this function is used to' says nothing the name did not."}
-   :doc/params-unnamed {:category :readability
+   :doc/params-unnamed {:evidence :corpus :note "272 -> 133 on defnet after the length guard; the cut ones were read" :category :readability
                         :instruction "Name each parameter and what it must be; a reader at the call site has the arglist, not the body."}
-   :doc/placeholder    {:category :warning
+   :doc/placeholder    {:evidence :corpus :category :warning
                         :instruction "Write the docstring or remove the placeholder; a TODO docstring reads as documented in every tool."}
-   :doc/ns-missing     {:category :design
+   :doc/ns-missing     {:evidence :corpus :category :design
                         :instruction "A namespace docstring says what lives here and why it is separate; one sentence is enough."}})
 
 (def hedges

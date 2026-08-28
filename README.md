@@ -275,6 +275,18 @@ complexity finding carried `:symbol nil` (the name was only in the
 message), and `cond-as-case` and a `rules.edn` row fired twice on
 `complexity.cljc:379` — one fact, one rule; the row is gone.
 
+**Run on the estate, 2026-08-28.** agentia `lib/`: 26 findings (16 boxed,
+3 reflection, all judged; `-main` cognitive 35). sonar-clojure `src/`: 259
+— and 225 of them say `:unjudged`, because 14 of its 26 files need the
+plugin's classpath and the oracle never compiled them; the 11 judged
+boxed operations are the compiler's 11. The first sonar-clojure score
+was five false reflections, and every one was the instrument: `bin/oracle`
+had thrown on the unloadable namespaces and written no table. defnet's
+own cljs: 55 predictions, 0 warnings — the JS row that says how far that
+host still is. What the runs changed in sift: a finding in a file the
+oracle never compiled says so on itself; an unqualified head is this
+namespace's var before core's; taint findings name their ends.
+
 **Four scripts.** `bin/oracle` (JVM: notes, loaded, tags, kondo),
 `bin/oracle-js` (Closure's extern names), `bin/validate` (the scorecard;
 it judges in-process — `falsify` is folded in; `--residue` prints the

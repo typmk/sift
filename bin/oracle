@@ -24,6 +24,12 @@
 ;;                 statically or constructs, one level of what those return,
 ;;                 and the Clojure collection classes a literal compiles to —
 ;;                 typeflow runs Compiler.paramArgTypeMatch over these
+;;   definitions.edn one map per line for every var the image holds in a
+;;                 project namespace, and for every var ANYWHERE whose meta
+;;                 names no file — a definition evaluated at a REPL. This is
+;;                 SBCL's source-location with a nil file, and the one honest
+;;                 producer for defnet's :add-fn: {:name "ns/sym" :file
+;;                 "src/x.clj"|nil :line n :arglists "…" :macro? b :private? b}
 ;;   analysis.json clj-kondo's analysis, if clj-kondo is on PATH
 ;;
 ;; Classes are keyed by full name and reached by simple name through
@@ -172,6 +178,29 @@
         by-simple (reduce (fn [m ^Class c] (update m (sname c) (fnil conj []) (.getName c))) (sorted-map) classes)]
     (spit (str out "/tags.edn") (pr-str {:vars vars :classes table :by-simple by-simple}))
     (binding [*out* *err*] (println (count vars) "tagged vars," (count table) "classes")))
+  (let [project-nses (set (map second ns-forms))
+        no-file? (fn [f] (or (nil? f) (= f "NO_SOURCE_PATH") (= f "NO_SOURCE_FILE")))
+        ;; A protocol method's var carries no :file either — defprotocol
+        ;; interns it without one — and 69 of those across clojure.core,
+        ;; rewrite-clj and spec would read as REPL definitions. :protocol on
+        ;; the meta tells them apart.
+        defs (for [n (all-ns)
+                   [s v] (ns-interns n)
+                   :let [m (meta v) f (:file m)]
+                   ;; Project namespaces whole; `user` only for what has no
+                   ;; file. clojure.core's RT-interned vars — *ns*, in-ns,
+                   ;; load-file — have no file either and are not REPL work.
+                   :when (and (not (:protocol m))
+                              (or (contains? project-nses (ns-name n))
+                                  (and (= 'user (ns-name n)) (no-file? f))))]
+               (cond-> {:name (str (ns-name n) "/" s)
+                        :file (when-not (no-file? f) f)
+                        :line (:line m)}
+                 (:arglists m) (assoc :arglists (pr-str (:arglists m)))
+                 (:macro m) (assoc :macro? true)
+                 (:private m) (assoc :private? true)))]
+    (spit (str out "/definitions.edn") (with-out-str (run! prn defs)))
+    (binding [*out* *err*] (println (count defs) "definitions," (count (remove :file defs)) "with no file")))
   ;; 3. kondo, if present
   (let [r (try (apply sh/sh "clj-kondo" "--lint" (concat roots ["--config" "{:analysis {:arglists true :locals true} :output {:format :json}}"]))
                (catch Throwable _ nil))]

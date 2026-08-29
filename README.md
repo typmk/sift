@@ -148,7 +148,14 @@ never *this is well-typed*, only *the compiler will not know this tag here*.
 from clojure-runtime-book) is the lattice above the host.
 
 **Judged before believed — `bin/validate`, against the host compiler.**
-`bin/oracle`, run where a project loads, writes what the JVM knows:
+`bin/oracle`, run where a project loads, writes what the JVM knows — and,
+since 2026-08-29, `definitions.edn`: every var the image holds in a project
+namespace and every var in `user` with no `:file`, which is a definition
+evaluated at a REPL. defnet's `ingest op=scan file=<dir>` lands those as
+`:add-fn` with `:file nil`, the one honest producer for that event, and
+classes them `:repl-only` in `by=unused`. Protocol-method vars have no
+`:file` either and are told apart by `:protocol` on the meta; clojure.core's
+RT-interned vars (`*ns*`, `in-ns`) are not dumped at all:
 assay's reflection and boxed-math notes, the list of files that actually
 compiled, every var's return tag, and a class table — supertypes, fields,
 constructors and methods with parameter types and whether a public class

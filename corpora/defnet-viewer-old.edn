@@ -6,7 +6,9 @@
 ;; worktree of defnet at 92270f9^, the last commit whose viewer still had
 ;; its 42 :infer-warnings.
 {:name "defnet-viewer-old"
- :root "/tmp/claude-1000/-home-apollon-GitHub-defnet/6517e37c-f03f-485c-b184-2910d12c16f4/scratchpad/old/src/defnet/viewer"
+ :root "~/.cache/sift/corpora/defnet-viewer-old/src/defnet/viewer"
+ ;; recreate: git -C ~/GitHub/defnet archive "92270f9^" src/defnet/viewer
+ ;;           | tar -x -C ~/.cache/sift/corpora/defnet-viewer-old
  :oracle "~/.cache/sift/oracles/defnet-viewer-old"
  ;; first scores (2026-08-27): the pre-existing model, 262 predicted for 42
  ;; (P 0.16 R 1.00); with Closure's externs, 62 (P 0.68); with string-require

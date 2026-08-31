@@ -1,0 +1,9 @@
+;; a corpus bin/validate judges typeflow on. :role is the honest label —
+;; :in-sample was learned from, :held-out was judged after the rules were
+;; written, :blind was never read before its first score was recorded.
+{:name "cherry"
+ :root "~/GitHub/cherry/src"
+ :oracle "~/.cache/sift/oracles/cherry-blind"
+ ;; first score, never read (2026-08-31, cherry 06077c9): boxed 8/10 predicted,
+ ;; P 1.00 R 0.80; reflection 0 oracle / 0 predicted. Residue NOT read.
+ :role :blind}

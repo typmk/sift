@@ -9,4 +9,4 @@
  ;; first oracle was itself wrong — assay's 256 KB sink had dropped 2,300
  ;; notes — and read as P 0.25. Learned from since; a role only moves this
  ;; way.
- :role :held-out}
+ :role :in-sample}

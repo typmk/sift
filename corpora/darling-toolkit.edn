@@ -7,4 +7,4 @@
  ;; first score, before any of it was read (2026-08-27): boxed 38/39,
  ;; reflection P 0.85 R 0.85. Its six misses were read; a role only moves
  ;; this way.
- :role :held-out}
+ :role :in-sample}

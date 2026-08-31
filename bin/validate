@@ -82,7 +82,10 @@
       ;; classpath run that warns on reflection but cannot on boxing
       (doseq [kind (or kinds (if (fs/exists? (str oracle "/closure.log")) ["uninferred"] ["boxed-math" "reflection"]))]
         (let [{:keys [oracle predicted tp fp fn p r fns fps]} (judge root oracle kind)]
-          (printf "%-12s %-10s %-11s %4d %4d %4d %4d %4d  P %.3f R %.3f%n" name (clojure.core/name role) kind oracle predicted tp fp fn p r)
+          ;; 0 predicted / 0 in the oracle is a correct empty, not a score of
+          ;; zero — P 0.000 there reads as failure and is nothing of the kind.
+          (printf "%-12s %-10s %-11s %4d %4d %4d %4d %4d  P %s R %s%n" name (clojure.core/name role) kind oracle predicted tp fp fn
+                  (if (pos? predicted) (format "%.3f" p) "  —  ") (if (pos? oracle) (format "%.3f" r) "  —  "))
           (when (residue)
             (doseq [k (take 10 fns)] (println "     missed   " k))
             (doseq [k (take 10 fps)] (println "     wrong    " k)))))))

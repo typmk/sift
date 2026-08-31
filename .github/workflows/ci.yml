@@ -1,0 +1,29 @@
+# The suite is the gate; bin/validate is the measurement and needs oracle
+# dumps that live outside the repo, so it does not run here.
+#
+# sonar-clojure used to run this suite a second time via `-d ../sift/test`
+# on its own :test alias. Since it depends on sift as a git dep rather than
+# a sibling checkout, that path no longer exists there — this workflow is
+# where the library proves it stands alone.
+name: ci
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: DeLaGuardo/setup-clojure@13.4
+        with:
+          cli: latest
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.m2/repository
+            ~/.gitlibs
+          key: cdeps-${{ hashFiles('deps.edn') }}
+          restore-keys: cdeps-
+      - run: clojure -M:test

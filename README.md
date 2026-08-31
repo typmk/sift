@@ -356,7 +356,7 @@ sensor passes text now. A top-level form outside any unit is not scored,
 as Sonar does not score it.
 
 **How to validate what this README claims.** Three commands, in order of
-what they prove: `clojure -M:test` is the gate (110 tests / 470
+what they prove: `clojure -M:test` is the gate (138 tests / 579
 assertions — corpus flag/clear pairs, every learned compiler fact, and
 `evidence_test`, which fails on any registered rule without an entry in
 `evidence.edn`); `bin/validate` is the measurement (typeflow against the
@@ -414,7 +414,7 @@ nothing should.
 
     clojure -M:test
 
-103 tests, 351 assertions. `sonar-clojure` runs the same files a second time
+138 tests, 579 assertions (CI, 2d04306, 2026-08-31 — the number moves; the run prints it). `sonar-clojure` runs the same files a second time
 through its own `:test` alias (`-d ../sift/test`): this harness proves the
 library stands alone, that one proves it still fits the consumer.
 

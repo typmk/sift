@@ -23,9 +23,12 @@
 ;; :match, :not [P …] to exclude, :inside P for an ancestor that must match
 ;; with the SAME bindings.
 ;;
-;; ORDER MATTERS: the first rule that matches a form wins, so a more
-;; specific pattern goes above the general one it overlaps —
-;; (if (not ?t) ?a nil) above both (if ?t ?a nil) and (if (not ?t) ?a ?b).
+;; ORDER DOES NOT MATTER: the first rule that matches a form wins, and no
+;; two rules can match one form — every pattern's head is a literal symbol
+;; and no head appears in two rules. data_rules_order_test pins that;
+;; bin/rule-order measures it (20 shuffled orders, four corpora, zero forms
+;; whose finding moved, 2026-09-02). A rule whose head another rule already
+;; carries needs a :not or a guard, not a position.
 ;;
 ;; NOT HERE: what splint (noahtheduke/splint, in the estate's `lint:style`)
 ;; already says. Measured 2026-08-27 on this corpus, six data rules were

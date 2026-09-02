@@ -139,8 +139,9 @@
         binds))))
 
 (defn- try-rules
-  "The FIRST rule that matches wins — one form, one finding. rules.edn is
-  ordered specific before general for that reason."
+  "The first rule that matches wins — one form, one finding. Which rule is
+  first does not matter: no two rules share a pattern head, so at most one
+  can match (data_rules_order_test, bin/rule-order)."
   [file zloc form]
   (let [form (resolve-head form)]
     (some (fn [rule]

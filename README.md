@@ -82,7 +82,7 @@ group — so `(cond (?? (= ?x ?k) ?e) ... :else ?d)` walks the pairs and
 `(case ?x (?? ?k ?e) ... ?d)` writes them back. `:when` names guards. The
 file is inlined at compile time by a macro, so it is one file on the JVM,
 under babashka and in ClojureScript, and a rule that does not parse fails
-the build. First match wins per form; order the file specific to general.
+the build. First match wins per form, and no two rules share a pattern head, so the order is not load-bearing (`bin/rule-order` measures it).
 A rule that needs the zipper, positions across forms or a count stays a
 coded rule and is registered beside these — the format does not decide what
 is a rule, the corpus does, and every data rule has its flag and clear

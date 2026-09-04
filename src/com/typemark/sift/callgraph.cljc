@@ -24,26 +24,138 @@
   a lower confidence than the direct case rather than mixed in with it."
   (:require [com.typemark.sift.json :as json]))
 
+(def ^:private js-max-row
+  "An open-ended region runs to the end of the file. A literal rather than
+  Long/MAX_VALUE, which does not exist in ClojureScript -- this namespace
+  compiles to CLJS inside defnet, the same reason `format` is banned here."
+  1000000)
+
+(defn- row-of [m] (or (get m "row") (get m "name-row")))
+
+(defn- arm-name
+  "The name of one multimethod arm, or nil for any other usage.
+
+  clj-kondo marks the usage of the multimethod inside each `defmethod` with
+  `defmethod` and `dispatch-val-str`. A keyword dispatch value carries its own
+  colon and the separator supplies one, so it is stripped -- the result equals
+  the node name defnet's parser gives the same arm."
+  [u]
+  (when (get u "defmethod")
+    (let [d (get u "dispatch-val-str")
+          d (if (and d (= \: (first d))) (subs d 1) d)]
+      (when (seq d) (str (get u "name") "::" d)))))
+
+(defn- owner-regions
+  "The spans clj-kondo attributes no `from-var` to, and who owns each.
+
+  THIS IS THE WHOLE POINT OF THE NAMESPACE HOLDING TOGETHER. `from-var`
+  attributes a usage to a VAR, and neither a protocol implementation nor a
+  multimethod arm defines one -- so every call in those bodies arrived with
+  `from-var` absent and was dropped on the floor. In Clojure that is precisely
+  where polymorphic dispatch lands: an `-render` that interpolates a request
+  value, a `(defmethod handle :upload)` that writes a file. The taint graph
+  reported clean because it never saw the node. Measured on defnet's own src:
+  284 orphan usages inside protocol-impl spans and all 31 multimethod arms.
+
+  Two shapes, and they are not equally precise:
+
+    protocol impls -- EXACT. `:protocol-impls` gives a real row span, and
+                      covers deftype, defrecord, reify, extend-type and
+                      extend-protocol.
+    multimethod arms -- BOUNDED, not exact. The marker usage spans the
+                      multimethod's name symbol only, so the arm's extent is
+                      taken as running to the next region or var definition in
+                      the same file. A top-level form sitting between two arms
+                      is therefore attributed to the earlier arm. That is an
+                      over-approximation of the same kind this namespace
+                      already declares for argument positions, and it errs
+                      toward a false positive rather than the false negative
+                      that dropping the call outright guarantees."
+  [a]
+  (let [impls (for [p (get a "protocol-impls" [])]
+                {:file (get p "filename")
+                 :from (get p "row")
+                 :to   (get p "end-row")
+                 :owner [(get p "impl-ns")
+                         (str (get p "protocol-name") "/" (get p "method-name"))]
+                 :via  [(get p "protocol-ns") (get p "method-name")]})
+        arms  (for [u (get a "var-usages" [])
+                    :let [nm (arm-name u)]
+                    :when nm]
+                {:file (get u "filename")
+                 :from (row-of u)
+                 :owner [(get u "from") nm]
+                 :via  [(get u "to") (get u "name")]})
+        starts (reduce (fn [m x]
+                         (if (and (:file x) (:from x))
+                           (update m (:file x) (fnil conj []) (:from x))
+                           m))
+                       {}
+                       (concat impls arms
+                               (for [d (get a "var-definitions" [])]
+                                 {:file (get d "filename") :from (row-of d)})))
+        sorted (into {} (for [[f rs] starts] [f (vec (sort rs))]))]
+    (vec (for [x (concat impls arms)]
+           (assoc x :to (or (:to x)
+                            (if-let [nxt (first (drop-while #(<= % (:from x))
+                                                            (get sorted (:file x))))]
+                              (dec nxt)
+                              js-max-row)))))))
+
+(defn- owner-of
+  "The innermost region containing this position, or nil."
+  [regions file row]
+  (when (and file row)
+    (->> regions
+         (filter #(and (= file (:file %))
+                       (<= (:from %) row)
+                       (<= row (:to %))))
+         (sort-by :from >)
+         first)))
+
 (defn call-graph
   "analysis JSON -> {[ns var] #{[callee-ns callee-var]}} plus the position of
-  each call site."
+  each call site.
+
+  A usage with no `from-var` is attributed to the protocol implementation or
+  multimethod arm containing it rather than discarded -- see `owner-regions`.
+  Each region also gains an incoming edge from the name a CALLER writes: the
+  protocol method var, or the multimethod. Without it an implementation is an
+  island that can only be tainted by calling a source itself, and the flow
+  from a handler through a polymorphic call into the body that answers it does
+  not exist."
   [analysis-text]
-  (let [a (get (json/read-str analysis-text) "analysis")]
-    (reduce
-     (fn [g u]
-       (let [from (get u "from-var")
-             fns' (get u "from")
-             to   (get u "to")
-             nm   (get u "name")]
-         (if (and from fns' to nm)
-           (update g [fns' from] (fnil conj #{})
-                   {:callee [to nm]
-                    :filename (get u "filename")
-                    :line (get u "name-row") :col (get u "name-col")
-                    :end-line (get u "name-end-row") :end-col (get u "name-end-col")})
-           g)))
-     {}
-     (get a "var-usages" []))))
+  (let [a (get (json/read-str analysis-text) "analysis")
+        regions (owner-regions a)
+        g (reduce
+           (fn [g u]
+             (let [from (get u "from-var")
+                   fns' (get u "from")
+                   to   (get u "to")
+                   nm   (get u "name")
+                   owner (cond
+                           (and from fns') [fns' from]
+                           (get u "defmethod") nil
+                           :else (:owner (owner-of regions (get u "filename")
+                                                   (row-of u))))]
+               (if (and owner to nm)
+                 (update g owner (fnil conj #{})
+                         {:callee [to nm]
+                          :filename (get u "filename")
+                          :line (get u "name-row") :col (get u "name-col")
+                          :end-line (get u "name-end-row") :end-col (get u "name-end-col")})
+                 g)))
+           {}
+           (get a "var-usages" []))]
+    (reduce (fn [g r]
+              (if (and (:via r) (:owner r))
+                (update g (:via r) (fnil conj #{})
+                        {:callee (:owner r)
+                         :filename (:file r)
+                         :line (:from r) :col 1
+                         :end-line (:from r) :end-col 1})
+                g))
+            g regions)))
 
 (defn- fixpoint
   "Grow `seed` along the graph until it stops growing. `edges` maps a node to

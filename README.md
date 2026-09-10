@@ -172,7 +172,15 @@ binding an element the compiler never types, `..` steps with no dot, a
 it resolved by the file's `:import`. Every one of those was a miss or a
 false positive on real code first, and every one is a test.
 
-| corpus | first score, blind | now | 
+**"now" is a DATE, not a live number.** Every row below was taken against
+the oracle dump of its day, and a dump decays: run `bin/validate` for what
+the instrument says today, and believe a row it labels STALE only as far as
+the label allows. Measured 2026-09-10, five of twelve dumps were behind
+their source — lume by 12 days and reading 0.598 where this table records
+1.000, sift by 1 and reading 0.933 until it was re-dumped at 1.000. The
+table is a record of what was scored; `bin/validate` is the score.
+
+| corpus | first score, blind | scored, 2026-08-28 |
 |---|---|---|
 | lume (91 files, 335 notes) | in-sample — learned from | boxed **106 / 106**, reflection **26 / 26** |
 | sift (32 files, 102 notes) | held-out | boxed **56 / 56**, reflection: oracle empty, 0 predicted |

@@ -18,6 +18,37 @@
 ;;                 without a class: ^js on ClojureScript.
 ;;   :warns        which predictions this host's compiler actually emits, so a
 ;;                 prediction with no oracle is not reported as a fact.
+;;
+;; The six below carried the last of typeflow's host branches. The flow was
+;; already host-neutral -- 20 mentions of a host in 1,125 lines, of which 8
+;; were real branches -- and each of those 8 is now one of these keys, so a
+;; dialect is a row here and nowhere else. bin/validate is the proof: every
+;; corpus scored identically before and after.
+;;
+;;   :files        the extensions that compile for this host. host-of reads
+;;                 them; the row with :default true answers for the rest, so
+;;                 .clj and .cljc still score for the JVM.
+;;   :feature      the reader-conditional key this host answers to. #?(:clj a
+;;                 :cljs b) is a defmethod the reader evaluates and this is
+;;                 its dispatch value.
+;;   :tag-keywords bare keyword metadata that reads as a TYPE -- ^js on
+;;                 ClojureScript. ^:private and ^:const are not tags, and
+;;                 var-tags read "private" as a return class until this said
+;;                 so.
+;;   :unknown-receiver  what this host calls a member call on a receiver it
+;;                 cannot type, and which allow-list suppresses it.
+;;   :implicit-calls  special forms that emit a host call the source does not
+;;                 write: with-open expands to (.close x) per binding.
+;;   :overloads    does this host resolve an overload by parameter matching?
+;;                 The TABLES here are data; the matcher is not -- judge-method
+;;                 implements the JVM's own rules and the CLR's would be a
+;;                 second function. A host without overloads needs neither.
+;;   :warn-switch  the form that makes this host's compiler report, or absent.
+;;   :string-requires  does (:require ["d3" :as d3]) name the HOST rather than
+;;                 a namespace? On ClojureScript shadow tags those `js`. A
+;;                 .cljc scored for the JVM can still hold one inside a
+;;                 reader conditional, so this is a real guard and not a
+;;                 restatement of the file extension.
 {:jvm {:primitives #{"long" "double" "int" "float" "boolean" "char" "byte" "short"}
        ;; true/false are a BooleanExpr whose class is java.lang.Boolean — boxed,
        ;; so (.setFlag x true) matches setFlag(Boolean) and not setFlag(boolean)
@@ -81,7 +112,15 @@
        ;; tagged "." — a known class — until clojure-mcp's (.. pb (start))
        :interop {:instance-call "^\\.[^-]" :field "^\\.-" :static "^([a-z][a-z0-9_]*\\.)*[A-Z][A-Za-z0-9_$.]*/" :ctor "[A-Za-z0-9_$]\\.$"}
        :known-receiver #{}
-       :warns #{:boxed-math :reflection}}
+       :warns #{:boxed-math :reflection}
+       :files #{".clj" ".cljc" ".bb"}
+       :default true
+       :feature :clj
+       :tag-keywords #{}
+       :unknown-receiver {:finding :reflection}
+       :implicit-calls {"with-open" ".close"}
+       :overloads true
+       :warn-switch "*warn-on-reflection*"}
 
  :js  {:primitives #{}
        :literal {:int "number" :float "number" :string "string" :char "string"
@@ -100,4 +139,14 @@
        ;; declare (typeflow/*externs*, from bin/oracle-js). The 648-vs-0 that
        ;; switched this host off was an EMPTY oracle — defnet's source was
        ;; already clean — judging a model; the viewer at 92270f9^ has 42.
-       :warns #{:uninferred}}}
+       :warns #{:uninferred}
+       :files #{".cljs"}
+       :feature :cljs
+       :tag-keywords #{:js}
+       ;; the externs allow-list is bin/oracle-js's; without it every property
+       ;; on an untyped receiver reads as uninferred and Closure would not warn
+       :unknown-receiver {:finding :uninferred :allowlist :externs}
+       :implicit-calls {}
+       :overloads false
+       :warn-switch nil
+       :string-requires true}}

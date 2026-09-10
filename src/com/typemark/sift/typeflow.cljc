@@ -47,10 +47,18 @@
   (into {} (for [{:keys [id jvm]} (:concepts concepts) :when jvm] [jvm id])))
 
 (defn host-of
-  "Which host a file compiles for: .cljs -> :js, else :jvm. A .cljc is
-  scored for the JVM; a dialect that wants otherwise passes `host`."
+  "Which host a file compiles for, by the :files of each row in hosts.edn;
+  the row marked :default answers for the rest, so .clj and .cljc score for
+  the JVM. A dialect that wants otherwise passes `host` -- and a .cljc is
+  read for BOTH, one score at a time, which is why this is a default and not
+  a decision."
   [path]
-  (if (and path (str/ends-with? path ".cljs")) :js :jvm))
+  (or (when path
+        (some (fn [[h {:keys [files]}]]
+                (when (some #(str/ends-with? (str path) %) files) h))
+              hosts))
+      (some (fn [[h r]] (when (:default r) h)) hosts)
+      :jvm))
 
 ;; ---- tags ---------------------------------------------------------------
 ;;
@@ -87,10 +95,16 @@
     (when (and c (= :reader-macro (z/tag c)))
       (let [[m body] (children c)]
         (when (and m (= "?" (z/string m)) body (z/list? body))
-          (let [want (if (= host :js) :cljs :clj)
+          (let [want (get-in hosts [host :feature])
                 pairs (partition 2 (children body))]
             (or (some (fn [[k v]] (when (= want (sexpr k ::no)) v)) pairs)
                 (some (fn [[k v]] (when (= :default (sexpr k ::no)) v)) pairs))))))))
+(def ^:dynamic *tag-keywords*
+  "hosts.edn's :tag-keywords for the host being walked. `hint-of` has nine
+  call sites and no host parameter, and this namespace already carries its
+  host-dependent context this way (*var-tags*, *classes*, *externs*)."
+  #{})
+
 (defn- known? [tag] (some? tag))
 
 (defn- hint-of
@@ -102,8 +116,9 @@
       (cond
         (symbol? form) (name form)
         ;; ^js is a tag; ^:private and ^:const are not, and var-tags read
-        ;; "private" as a return class until this said so
-        (keyword? form) (when (= :js form) "js")
+        ;; "private" as a return class until this said so. Which keywords are
+        ;; tags is the host's, in :tag-keywords
+        (keyword? form) (when (contains? *tag-keywords* form) (name form))
         (map? form) (some-> (or (:tag form) (get form 'tag)) str)
         :else nil))))
 
@@ -319,6 +334,20 @@
               (str nm))))))
 
 (def ^:dynamic *js-aliases* #{})
+
+(defn- unknown-receiver-finding
+  "What this host calls a member call on a receiver it cannot type: the JVM
+  reflects, ClojureScript fails to infer."
+  [host]
+  (get-in hosts [host :unknown-receiver :finding]))
+
+(defn- allowed-receiver?
+  "Is this property on the host's allow-list, so its compiler stays silent?
+  Only :externs today (bin/oracle-js's dump, read into *externs*). A host
+  that names no allow-list allows nothing."
+  [host prop]
+  (and (= :externs (get-in hosts [host :unknown-receiver :allowlist]))
+       *externs* (contains? *externs* prop)))
 
 (def ^:dynamic *annotate*
   "When set, predictions-in also emits one ::tag per list and symbol it
@@ -585,7 +614,8 @@
               ;; reflect; (.getBytes (minify text)) does.
               ;; a host member the table knows returns a primitive or a class
               ;; (d3/scaleSequential) — a call through a string-require alias is js
-              (and (= host :js) (head-full c) (contains? *js-aliases* (str (namespace (symbol (head-full c)))))) "host"
+              (and (get-in hosts [host :string-requires]) (head-full c)
+                   (contains? *js-aliases* (str (namespace (symbol (head-full c)))))) "host"
               ;; a static call: the dump judges it first — (Math/abs boxed) answers
               ;; a boxed Number where the hand table below says double; the
               ;; table is the text-only fallback. Undumped is known, unnamed.
@@ -705,8 +735,8 @@
                             ;; a member step
                             ik
                             (if-not (known? cur)
-                              (do (when-not (and (= host :js) *externs* (contains? *externs* (subs sh (if (= :field ik) 2 1))))
-                                    (emit (if (= host :js) :uninferred :reflection) at {:op sh :interop ik :receiver recv}))
+                              (do (when-not (allowed-receiver? host (subs sh (if (= :field ik) 2 1)))
+                                    (emit (unknown-receiver-finding host) at {:op sh :interop ik :receiver recv}))
                                   nil)
                               (let [j (when (= :instance-call ik) (judge-method host cur (subs sh 1) arg-tags))]
                                 (case (:status j)
@@ -755,7 +785,8 @@
     (or (known? t)
         (and nm (str/starts-with? nm "js/"))
         ;; d3 / d3/scaleSequential / Graph from a string require
-        (and full (= host :js) (or (contains? *js-aliases* full)
+        (and full (get-in hosts [host :string-requires])
+             (or (contains? *js-aliases* full)
                                    (contains? *js-aliases* (namespace (symbol full)))))
         (and nm (contains? (get-in hosts [host :known-receiver]) (hint-of zloc))))))
 
@@ -814,12 +845,15 @@
                                    "if-some" "when-some" "when-first"} h)
                       (let [env' (or (walk-binds env (second kids) (contains? #{"doseq" "for" "when-first"} h)) env)]
                         ;; with-open expands to (.close x) for each binding, at the
-                        ;; form's own position — clojure-mcp nrepl.clj:221
-                        (when (and (= "with-open" h) (= host :jvm) (z/vector? (peel (second kids))))
-                          (doseq [[lhs _] (vec-pairs (peel (second kids)))
-                                  :let [nm (token-name lhs)]
-                                  :when (and nm (not (known? (get env' nm))))]
-                            (emit! :reflection c {:op ".close" :interop :instance-call :receiver nm})))
+                        ;; form's own position — clojure-mcp nrepl.clj:221. Which
+                        ;; forms do that is the host's, in :implicit-calls
+                        (when-let [implied (get-in hosts [host :implicit-calls h])]
+                          (when (z/vector? (peel (second kids)))
+                            (doseq [[lhs _] (vec-pairs (peel (second kids)))
+                                    :let [nm (token-name lhs)]
+                                    :when (and nm (not (known? (get env' nm))))]
+                              (emit! (unknown-receiver-finding host) c
+                                     {:op implied :interop :instance-call :receiver nm}))))
                         (doseq [k (drop 2 kids)] (walk env' k)))
 
                       ;; (doto x (.a) (.b)) / (-> x (.a) (.b)) / (.. x a b): the
@@ -941,11 +975,11 @@
                         (when-let [ik (interop-kind host h)]
                           (when-let [recv (second kids)]
                             (if-not (receiver-known? host env recv)
-                              (when-not (and (= host :js) *externs* (contains? *externs* (subs h (if (= :field ik) 2 1))))
-                                (emit! (if (= host :js) :uninferred :reflection) c
+                              (when-not (allowed-receiver? host (subs h (if (= :field ik) 2 1)))
+                                (emit! (unknown-receiver-finding host) c
                                        {:op h :interop ik :receiver (some-> recv peel z/string)}))
                               ;; known receiver: the dump judges the overload
-                              (when (and (= host :jvm) (= ik :instance-call))
+                              (when (and (get-in hosts [host :overloads]) (= ik :instance-call))
                                 (let [tags (map #(tag-of host env %) (drop 2 kids))
                                       j (judge-method host (tag-of host env recv) (subs h 1) tags)]
                                   (when (= :reflect (:status j))
@@ -953,7 +987,7 @@
                         ;; a constructor or static call resolves an overload by
                         ;; the compiler's own parameter matching, from the dump;
                         ;; without one there is no verdict, and no guess
-                        (when (= host :jvm)
+                        (when (get-in hosts [host :overloads])
                           (let [hf (head-full c)
                                 tags (map #(tag-of host env %) (rest kids))
                                 ctor? (and hf (re-find (re-pattern (get-in hosts [host :interop :ctor])) hf))
@@ -1042,22 +1076,23 @@
      (predictions* text path host))))
 
 (defn- reflection-unwarned
-  "A JVM file with interop calls and no (set! *warn-on-reflection* true):
-  every reflective call in it is silent. File-level, one finding."
+  "A file with interop calls and no (set! <the host's switch> true): every
+  reflective call in it is silent. File-level, one finding. A host with no
+  switch in hosts.edn has nothing to say here."
   [host zloc path]
-  (when (= :jvm host)
+  (when-let [switch (get-in hosts [host :warn-switch])]
     (let [interop (collect zloc (fn [c] (let [f (head-full c)]
                                           (and f (or (interop-kind host (head* c))
                                                      (re-find (re-pattern (get-in hosts [host :interop :static])) f)
                                                      (re-find (re-pattern (get-in hosts [host :interop :ctor])) f))))))
           warned? (some (fn [c] (and (= "set!" (head-name c))
-                                     (= "*warn-on-reflection*" (some-> (children c) second peel z/string))))
+                                     (= switch (some-> (children c) second peel z/string))))
                         (collect zloc #(= "set!" (head-name %))))]
       (when (and (seq interop) (not warned?))
         (let [[line col] (or (pos-of (first interop)) [1 1])]
           [{:kind :reflection-unwarned :line line :column col :file path
             :count (count interop)
-            :counterpart '(set! *warn-on-reflection* true)}])))))
+            :counterpart (list 'set! (symbol switch) true)}])))))
 
 (defn- predictions*
   [text path host]
@@ -1068,7 +1103,8 @@
       []
       (binding [*ns-name* (ns-name-of zloc)
                 *imports* (imports-of zloc)
-                *js-aliases* (js-aliases-of zloc)]
+                *js-aliases* (js-aliases-of zloc)
+                *tag-keywords* (get-in hosts [host :tag-keywords] #{})]
        ;; EVERY top-level form: the compiler compiles (register-converter :k
        ;; (fn [bpm] (/ 60000 bpm))) as surely as a defn, and kora's ten misses
        ;; were all inside one. :in is the def's name where there is one, else

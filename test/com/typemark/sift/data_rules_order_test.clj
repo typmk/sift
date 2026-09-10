@@ -8,10 +8,16 @@
   (:require [clojure.test :refer [deftest is testing]]
             [com.typemark.sift.data :as data]))
 
-(defn- heads [{:keys [match either]}]
-  (for [p (if either either [match])
-        :let [h (when (seq? p) (first p))]]
-    h))
+(defn- heads
+  "The literal head of every pattern a rule carries. A :head-ns rule has no
+  pattern — it names a class and its members are wild — so it contributes
+  the class name itself, which is what it claims and what must be unique."
+  [{:keys [match either head-ns]}]
+  (if head-ns
+    [(symbol head-ns)]
+    (for [p (if either either [match])
+          :let [h (when (seq? p) (first p))]]
+      h)))
 
 (deftest every-pattern-has-a-literal-head
   (doseq [r data/rules, h (heads r)]

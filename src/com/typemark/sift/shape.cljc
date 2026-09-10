@@ -17,7 +17,9 @@
   the `--apply` that `places` had belongs to a gated editor, not a linter.
 
   `^:places/allow` on the binding peels a finding, as it did."
-  (:require [com.typemark.sift.cond-case :as cond-case]
+  (:require [com.typemark.sift.cond-build :as cond-build]
+            [com.typemark.sift.let-chain :as let-chain]
+            [com.typemark.sift.cond-case :as cond-case]
             [com.typemark.sift.data :as data]
             [com.typemark.sift.fold :as fold]
             [com.typemark.sift.host :as host]
@@ -42,6 +44,10 @@
    map-loop/rule  {:category :refactor :instruction map-loop/instruction :evidence :corpus}
    loop-fold/rule {:category :refactor :instruction loop-fold/instruction :evidence :corpus :note "0 on hand-written code, 1 in clojure.core — fires on generated code"}
    cond-case/rule {:category :readability :instruction cond-case/instruction :evidence :corpus :note "1 on defnet, 7 in clojure.core, all read"}
+   cond-build/rule {:category :refactor :instruction cond-build/instruction :evidence :corpus
+                    :note "8 of 12,248 let forms over 1,131 files; clojure.core's own defn rebuilds fdecl four times"}
+   let-chain/rule  {:category :refactor :instruction let-chain/instruction :evidence :corpus
+                    :note "13 of 12,248 let forms; 18 before refusing a conditional step and a qualified let — p/let is promise sequencing, not a chain"}
    ;; the host boundary — see host.cljc
    :catch-all-swallow     (assoc (:catch-all-swallow host/rules) :evidence :corpus :note "65 on defnet, this repo's every-failure-is-a-value style; baseline them")
    :mutable-escape        (assoc (:mutable-escape host/rules) :evidence :corpus)
@@ -73,6 +79,8 @@
                   (into maps)
                   (into (loop-fold/findings file zloc taken))
                   (into (cond-case/findings file zloc))
+                  (into (cond-build/findings file zloc))
+                  (into (let-chain/findings file zloc))
                   (into (host/findings file zloc))
                   (into (data/findings file zloc))
                   ;; the two host rules that live in typeflow's env

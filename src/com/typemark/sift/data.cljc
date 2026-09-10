@@ -18,8 +18,30 @@
     :not    [P …]   and none of these
     :inside P       and some ANCESTOR form matches P — with the same
                     bindings, so `(deref ?a)` :inside `(swap! ?a ?&_)` is
-                    the atom read inside its own swap. Positions come from the zipper
-  node the form was read from; the match itself is over the sexpr."
+                    the atom read inside its own swap.
+    :not-inside [P …] and NO ancestor matches any of these — an io/reader
+                    that is not under a with-open.
+
+  And two things a pattern cannot say at all:
+
+    :scope          :body (the default, and what every rule was until
+                    2026-09-10) looks only inside a defining form, because a
+                    top-level `(let …)` is data being built. :top is a
+                    top-level form — a `load`, a `(defprotocol X)`, a
+                    `(defmulti ^:private …)` — which no data rule could see;
+                    :any is anywhere. Measured: ten of the smells in the
+                    nufuturo-ufcg Clojure catalogue are top-level forms and
+                    the gate hid every one.
+    :head-ns <class>  the head's NAMESPACE, member wild — clojure.lang.RT/*
+                    is the whole of Clojure's internals and enumerating its
+                    members is not a rule.
+
+  Heads resolve through the file's own `ns` aliases before matching, as they
+  already did through its `:import`, so `(a/<!! c)` is
+  `clojure.core.async/<!!` and a rule names the var once, in full.
+
+  Positions come from the zipper node the form was read from; the match
+  itself is over the sexpr."
   (:require [clojure.string :as str]
             [com.typemark.sift.typeflow :as typeflow] [com.typemark.sift.pattern :as pat]
             [com.typemark.sift.zip :refer [children collect inside-defn? peel pos-of sexpr]]
@@ -44,7 +66,9 @@
    :all-equal     (fn [v] (and (vector? v) (apply = v)))
    :each-case-key (fn [v] (and (vector? v) (every? #(or (keyword? %) (number? %) (string? %) (char? %)) v)))
    :each-symbol   (fn [v] (and (vector? v) (every? symbol? v)))
-   :at-least-2    (fn [v] (and (vector? v) (>= (count v) 2)))})
+   :at-least-2    (fn [v] (and (vector? v) (>= (count v) 2)))
+   ;; metadata survives rewrite-clj's sexpr, so ^:private is askable
+   :private-meta  (fn [v] (boolean (:private (meta v))))})
 
 (def ^:dynamic *tags*
   "{[line col] tag} from typeflow/tags for the file being scanned, so a
@@ -54,6 +78,27 @@
 (def ^:dynamic *classes* "bin/oracle's table, for :tag guards' supertypes." nil)
 
 (def ^:dynamic *imports* "{simple full} from the file's ns :import." {})
+
+(def ^:dynamic *aliases*
+  "{\"a\" \"clojure.core.async\"} from the file's ns :require, so a rule names
+  a var in full once and matches it however the file spells it."
+  {})
+
+(defn ns-aliases
+  "The file's own :require aliases. Public because `findings` binds it and
+  a caller with a zipper may want the same map."
+  [root]
+  (let [nsf (first (filter #(and (seq? %) (= 'ns (first %)))
+                           (map #(sexpr % ::no) (children root))))]
+    (into {}
+          (for [clause (rest nsf)
+                :when (and (seq? clause) (#{:require :require-macros} (first clause)))
+                spec (rest clause)
+                :when (vector? spec)
+                :let [[lib & opts] spec
+                      as (second (drop-while #(not= :as %) opts))]
+                :when (and as (symbol? lib))]
+            [(name as) (name lib)]))))
 
 (defn- guard-ok? [spec v pos]
   (cond
@@ -99,6 +144,8 @@
   (if (and (seq? form) (symbol? (first form)))
     (let [h (first form) ns' (namespace h) nm (name h)]
       (cond
+        ;; a Clojure alias: (a/<!! c) under (:require [clojure.core.async :as a])
+        (and ns' (get *aliases* ns')) (cons (symbol (get *aliases* ns') nm) (rest form))
         (and ns' (get *imports* ns')) (cons (symbol (get *imports* ns') nm) (rest form))
         ;; java.lang needs no import: (ProcessBuilder. c), (Thread/sleep n)
         (and ns' (re-matches #"[A-Z][A-Za-z0-9_$]*" ns')) (cons (symbol (str "java.lang." ns') nm) (rest form))
@@ -123,31 +170,72 @@
                                                                (first v) v)]))
                                                 binds))))))
 
-(defn- ancestors-of [zloc]
-  (->> (iterate z/up (z/up zloc)) (take-while some?) (map #(sexpr % ::no)) (remove #{::no})))
+(defn- unwrap-fn
+  "rewrite-clj parses `#(…)` as ONE :fn node whose children are the body's
+  own children — there is no list node for the body — and `sexpr` synthesises
+  `(fn* [] body)` around it. So an ancestor walk skips exactly one level
+  inside every #(), and `@a` in `#(swap! a assoc :k @a)` never found its own
+  swap!. Yield the body forms beside the wrapper."
+  [zloc form]
+  (if (and (= :fn (z/tag zloc)) (seq? form) (= 'fn* (first form)))
+    (cons form (filter seq? (drop 2 form)))
+    [form]))
+
+(defn- ancestors-of
+  "Every enclosing FORM, outward. A `^{…}` :meta node's sexpr IS its child's,
+  so without `peel` an annotated form is its own ancestor and a rule whose
+  :inside pattern also matches the form itself fires on it."
+  [zloc]
+  (->> (iterate z/up (z/up zloc))
+       (take-while some?)
+       (remove #(= :meta (z/tag %)))
+       (mapcat (fn [a] (let [s (sexpr a ::no)]
+                         (when (not= ::no s) (unwrap-fn a s)))))
+       ;; an ancestor's head resolves the same way the form's does, or
+       ;; :inside (clojure.core.async/go …) never sees (a/go …)
+       (map resolve-head)))
 
 (defn- match-rule
-  "Bindings for `form` under `rule`, or nil: :match / :either, then :not,
-  then :inside over the ancestors with the bindings carried through."
-  [{:keys [match either not inside]} form zloc]
-  (when-let [binds (if either
-                     (some #(pat/match % form) either)
-                     (pat/match match form))]
-    (when (not-any? #(pat/match % form) not)
-      (if inside
-        (some (fn [anc] (pat/match inside anc binds)) (ancestors-of zloc))
-        binds))))
+  "Bindings for `form` under `rule`, or nil: :head-ns alone, else
+  :match / :either, then :not, then :not-inside and :inside over the
+  ancestors with the bindings carried through."
+  [{:keys [match either not inside not-inside head-ns]} form zloc]
+  (if head-ns
+    (when (and (seq? form) (symbol? (first form)) (= head-ns (namespace (first form)))) {})
+    (when-let [binds (if either
+                       (some #(pat/match % form) either)
+                       (pat/match match form))]
+      (when (not-any? #(pat/match % form) not)
+        (let [ancs (ancestors-of zloc)]
+          (when (clojure.core/not-any? (fn [p] (some #(pat/match p % binds) ancs)) not-inside)
+            (if inside
+              (some (fn [p] (some (fn [a] (pat/match p a binds)) ancs))
+                    (if (vector? inside) inside [inside]))
+              binds)))))))
+
+(defn- top-level?
+  "A direct child of the file's root."
+  [zloc]
+  (let [u (z/up zloc)] (or (nil? u) (nil? (z/up u)))))
+
+(defn- in-scope? [scope zloc]
+  (case (or scope :body)
+    :body (inside-defn? zloc)
+    :top  (top-level? zloc)
+    :any  true))
 
 (defn- try-rules
   "The first rule that matches wins — one form, one finding. Which rule is
   first does not matter: no two rules share a pattern head, so at most one
-  can match (data_rules_order_test, bin/rule-order)."
+  can match (data_rules_order_test, bin/rule-order). Each rule is asked only
+  where its :scope says to look."
   [file zloc form]
   (let [form (resolve-head form)]
     (some (fn [rule]
-            (when-let [binds (match-rule rule form zloc)]
-              (when (guards-ok? rule binds (bound-positions zloc binds))
-                [(finding file zloc rule binds)])))
+            (when (in-scope? (:scope rule) zloc)
+              (when-let [binds (match-rule rule form zloc)]
+                (when (guards-ok? rule binds (bound-positions zloc binds))
+                  [(finding file zloc rule binds)]))))
           rules)))
 
 (defn findings
@@ -156,9 +244,9 @@
   ;; Any node whose sexpr is a list — a `()` list, but also `@a`, which is
   ;; a :deref node reading as (clojure.core/deref a). Collecting only
   ;; z/list? nodes made every deref invisible to every rule.
-  (vec (mapcat (fn [c]
-                 (when (inside-defn? c)
+  (binding [*aliases* (ns-aliases zloc)]
+    (vec (mapcat (fn [c]
                    (let [form (sexpr c ::no)]
                      (when (not= ::no form)
-                       (try-rules file c form)))))
-               (collect zloc (fn [c] (seq? (sexpr c ::no)))))))
+                       (try-rules file c form))))
+                 (collect zloc (fn [c] (seq? (sexpr c ::no))))))))

@@ -27,7 +27,11 @@
          (assert (keyword? id) (str "rule without :id: " (pr-str rule)))
          (assert (contains? #{:rewrite :forbid} kind) (str id " has unknown :kind " kind))
          (assert (contains? #{:compiler :parity :corpus :read :unjudged} (:evidence rule)) (str id " has no :evidence rung"))
-         (assert (or (some? match) (vector? (:either rule))) (str id " has no :match or :either"))
+         ;; :head-ns names a class whose MEMBERS are wild, so it carries no
+         ;; pattern — clojure.lang.RT/* is the whole of Clojure's internals
+         ;; and enumerating its members is not a rule.
+         (assert (or (some? match) (vector? (:either rule)) (string? (:head-ns rule)))
+                 (str id " has no :match, :either or :head-ns"))
          (when (= kind :rewrite)
            (assert (contains? rule :emit) (str id " is :rewrite and has no :emit"))))
        `(quote ~rules))))

@@ -1,0 +1,6 @@
+(ns corpus.clear.catalogue-nested-reference)
+(def global-state (atom {:ui {:theme :light} :history []}))
+(def a (atom 1))
+(def b (atom 2))
+(defn pair [] (let [x (atom 1) y (atom 2)] [x y]))
+(defonce registry ^{:doc "annotated, and not nested"} (atom {}))

@@ -65,6 +65,27 @@
      :r (if (pos? (count oracle)) (/ tp (double (count oracle))) 0.0)
      :fns (sort (set/difference oracle preds)) :fps (sort (set/difference preds oracle))}))
 
+(defn- newest
+  "The newest mtime under a root, over the files a compiler would read."
+  [root]
+  (->> (fs/glob root "**.{clj,cljc,cljs}")
+       (map #(.toMillis (fs/last-modified-time %)))
+       (reduce max 0)))
+
+(defn- staleness
+  "How far behind the corpus its oracle is, in days, or nil when the dump is
+  newer than every source file. An oracle decays silently: sift's own read
+  P 0.933 for two weeks because its dump was taken on 2026-08-27 and
+  callgraph.cljc changed on 2026-09-04, and every one of those four 'false
+  positives' was a site the instrument had never seen. SKIPPED is printed
+  for an absent oracle; nothing was printed for a stale one."
+  [root oracle]
+  (let [dump (first (filter fs/exists? [(str oracle "/notes.edn") (str oracle "/closure.log")]))
+        dumped (when dump (.toMillis (fs/last-modified-time dump)))
+        src (newest root)]
+    (when (and dumped (pos? src) (> src dumped))
+      (int (Math/ceil (/ (- src dumped) 86400000.0))))))
+
 (def ^:private residue-flag (some #{"--residue"} *command-line-args*))
 (defn residue [] residue-flag)
 (let [names (disj (set *command-line-args*) "--residue")
@@ -80,7 +101,11 @@
               (if (fs/exists? root) (str "no oracle at " oracle " (run bin/oracle in the project)") (str "no source at " root)))
       ;; :kinds in the manifest restricts what this oracle can judge — a
       ;; classpath run that warns on reflection but cannot on boxing
-      (doseq [kind (or kinds (if (fs/exists? (str oracle "/closure.log")) ["uninferred"] ["boxed-math" "reflection"]))]
+      (do
+       (when-let [d (staleness root oracle)]
+         (printf "%-12s %-10s STALE — the oracle is %d day(s) behind this source; re-run bin/oracle before believing the score%n"
+                 name (clojure.core/name role) d))
+       (doseq [kind (or kinds (if (fs/exists? (str oracle "/closure.log")) ["uninferred"] ["boxed-math" "reflection"]))]
         (let [{:keys [oracle predicted tp fp fn p r fns fps]} (judge root oracle kind)]
           ;; 0 predicted / 0 in the oracle is a correct empty, not a score of
           ;; zero — P 0.000 there reads as failure and is nothing of the kind.
@@ -88,7 +113,7 @@
                   (if (pos? predicted) (format "%.3f" p) "  —  ") (if (pos? oracle) (format "%.3f" r) "  —  "))
           (when (residue)
             (doseq [k (take 10 fns)] (println "     missed   " k))
-            (doseq [k (take 10 fps)] (println "     wrong    " k)))))))
+            (doseq [k (take 10 fps)] (println "     wrong    " k))))))))
   (println)
   (println "evidence ledger — derived from every rule's registry entry (sift/evidence)")
   (doseq [[rung rules] (sort-by key (group-by (comp :evidence val) (sift/evidence)))]

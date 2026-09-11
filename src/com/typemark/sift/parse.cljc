@@ -55,7 +55,11 @@
        :end-line (:end-row m) :end-col (:end-col m)})))
 
 (defn- walk
-  [node depth commented? quoted? branch-depth acc]
+  "Pre-order, so a node's subtree is the contiguous run after it. Each node
+  records where that run ends — :index, :last, and :parent, the :index of
+  the node immediately enclosing it when that one was recorded — which is
+  what lets `tree/children-of` and `tree/parent` slice instead of scan."
+  [node depth commented? quoted? branch-depth parent acc]
   (let [tag    (n/tag node)
         inner? (n/inner? node)
         p      (pos node)
@@ -67,6 +71,7 @@
                         (and list? (= "comment" head)))
         quoted?'    (or quoted? (contains? #{:quote :syntax-quote} tag))
         branch?     (and list? (contains? forms/branch head))
+        i    (count acc)
         acc' (if p
                (conj! acc (assoc p
                                  :tag tag
@@ -80,13 +85,38 @@
                                  :branch? branch?
                                  :function? (and list? (contains? forms/function head))
                                  :class? (and list? (contains? forms/type-def head))
-                                 :branch-nesting branch-depth))
+                                 :branch-nesting branch-depth
+                                 :index i
+                                 :last i
+                                 :parent parent))
                acc)]
     (if inner?
-      (reduce (fn [a c] (walk c (inc depth) commented?' quoted?'
-                              (cond-> branch-depth branch? inc) a))
-              acc' (n/children node))
+      (let [acc'' (reduce (fn [a c] (walk c (inc depth) commented?' quoted?'
+                                          (cond-> branch-depth branch? inc) (when p i) a))
+                          acc' (n/children node))
+            end   (dec (count acc''))]
+        (if (and p (> end i))
+          (assoc! acc'' i (assoc (nth acc'' i) :last end))
+          acc''))
       acc')))
+
+(defn nodes-of
+  "The node stream of a tree `rewrite-clj.parser/parse-string-all` returned."
+  [root]
+  (persistent! (walk root 0 false false 0 nil (transient []))))
+
+(defn parse-root
+  "`parse`, keeping the rewrite-clj tree as :root, so a caller that reads
+  both — `analyze` — parses once."
+  [source]
+  (try
+    (let [root (p/parse-string-all source)]
+      {:ok? true :root root :nodes (nodes-of root)})
+    ;; :default rather than js/Error on the cljs side: a reader error can be
+    ;; thrown as a plain value, and catching only js/Error would let it escape
+    ;; as an uncaught exception rather than becoming {:ok? false}.
+    (catch #?(:clj Exception :cljs :default) e
+      {:ok? false :error #?(:clj (.getMessage e) :cljs (ex-message e))})))
 
 (defn parse
   "Source -> {:ok? true :nodes [...]} or {:ok? false :error msg}.
@@ -95,14 +125,7 @@
   have reported as a syntax finding. The sensor says so rather than silently
   contributing zero lines to ncloc."
   [source]
-  (try
-    {:ok? true
-     :nodes (persistent! (walk (p/parse-string-all source) 0 false false 0 (transient [])))}
-    ;; :default rather than js/Error on the cljs side: a reader error can be
-    ;; thrown as a plain value, and catching only js/Error would let it escape
-    ;; as an uncaught exception rather than becoming {:ok? false}.
-    (catch #?(:clj Exception :cljs :default) e
-      {:ok? false :error #?(:clj (.getMessage e) :cljs (ex-message e))})))
+  (dissoc (parse-root source) :root))
 
 (defn leaves
   "Nodes with no children: what highlighting and duplication are computed

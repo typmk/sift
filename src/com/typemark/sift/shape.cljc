@@ -63,29 +63,33 @@
   :unspecified — a finding with no form."
   #{:machine-applicable :maybe-incorrect :has-placeholders :unspecified})
 
+(defn- findings-in
+  [zloc file typeflow-findings]
+  (let [maps (map-loop/findings file zloc)
+        taken (into #{} (map (juxt :line :column)) maps)]
+    (mapv (fn [f] (let [{:keys [category instruction]} (get rules (:rule f))]
+                    (assoc f :category category :instruction (or (:instruction f) instruction))))
+          (-> (vec (fold/findings file zloc))
+              (into maps)
+              (into (loop-fold/findings file zloc taken))
+              (into (cond-case/findings file zloc))
+              (into (cond-build/findings file zloc))
+              (into (let-chain/findings file zloc))
+              (into (host/findings file zloc))
+              (into (data/findings file zloc))
+              ;; the two host rules that live in typeflow's env
+              (into (filter #(contains? #{:js-prop-on-own-object :reflection-unwarned} (:rule %))
+                            typeflow-findings))))))
+
 (defn- findings*
   [text file]
   ;; `edn*`, not `of-string`: `of-string` moves to the FIRST form, and a
   ;; walk from there sees only the ns form. Measured: every corpus file
   ;; read as clean.
-  (let [zloc (try (z/edn* (parser/parse-string-all text) {:track-position? true})
+  (let [zloc (try (z/edn* (parser/parse-string-all text))
                   (catch #?(:clj Exception :cljs :default) _ nil))]
     (if zloc
-      (let [maps (map-loop/findings file zloc)
-            taken (into #{} (map (juxt :line :column)) maps)]
-        (mapv (fn [f] (let [{:keys [category instruction]} (get rules (:rule f))]
-                        (assoc f :category category :instruction (or (:instruction f) instruction))))
-              (-> (vec (fold/findings file zloc))
-                  (into maps)
-                  (into (loop-fold/findings file zloc taken))
-                  (into (cond-case/findings file zloc))
-                  (into (cond-build/findings file zloc))
-                  (into (let-chain/findings file zloc))
-                  (into (host/findings file zloc))
-                  (into (data/findings file zloc))
-                  ;; the two host rules that live in typeflow's env
-                  (into (filter #(contains? #{:js-prop-on-own-object :reflection-unwarned} (:rule %))
-                                (typeflow/findings text file))))))
+      (findings-in zloc file (typeflow/findings text file))
       [])))
 
 (defn findings
@@ -97,3 +101,10 @@
   ([text file resolve-idx]
    (binding [fold/*resolve* (resolve/for-file resolve-idx file)]
      (findings* text file))))
+
+(defn findings-at
+  "`findings` over a root zipper the caller already made, with the typeflow
+  findings the two host rules are taken from."
+  [zloc file resolve-idx typeflow-findings]
+  (binding [fold/*resolve* (resolve/for-file resolve-idx file)]
+    (findings-in zloc file typeflow-findings)))

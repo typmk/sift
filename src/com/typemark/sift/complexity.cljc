@@ -464,6 +464,21 @@
                                     (mapcat :body (:cases node))))))
           nodes))
 
+(defn- guarded
+  "{:ok? false :error msg} for anything `f` throws: a source that does not
+  read, or a form the lowering does not know."
+  [f]
+  (try
+    (f)
+    (catch #?(:clj Exception :cljs :default) e
+      {:ok? false :error #?(:clj (.getMessage e) :cljs (ex-message e))})))
+
+(defn- score-root [root path]
+  (let [ctx   {:top? true :features (features-for path)}
+        units (lower-seq ctx (kids root))]
+    {:ok? true
+     :functions (mapv score-function (functions-in units))}))
+
 (defn report
   "Source -> {:ok? true :functions [unit …]} or {:ok? false :error msg}.
 
@@ -472,13 +487,13 @@
   scored (`.cljs` -> :cljs, else :clj); nil means :clj."
   ([source] (report source nil))
   ([source path]
-   (try
-     (let [ctx   {:top? true :features (features-for path)}
-           units (lower-seq ctx (kids (p/parse-string-all source)))]
-       {:ok? true
-        :functions (mapv score-function (functions-in units))})
-     (catch #?(:clj Exception :cljs :default) e
-       {:ok? false :error #?(:clj (.getMessage e) :cljs (ex-message e))}))))
+   (guarded #(score-root (p/parse-string-all source) path))))
+
+(defn report-of
+  "`report` over a tree `rewrite-clj.parser/parse-string-all` already
+  returned — `analyze` parses once for every rule family."
+  [root path]
+  (guarded #(score-root root path)))
 
 (defn flatten-units
   "Every unit at every depth, parents before children."
@@ -489,21 +504,25 @@
   "Sonar's default for S3776. A function above it is reported."
   15)
 
+(defn over-threshold
+  "The findings for the units over `threshold` in a `report` already made."
+  [{:keys [ok? functions]} threshold]
+  (when ok?
+    (for [u (flatten-units functions) :when (> (:cognitive u) threshold)]
+      {:rule    :cognitive-complexity
+       :evidence :parity :note "5,519/5,531 units vs cccc on defnet; Spearman 0.989 vs SonarJS on LightTable"
+       ;; the unit's name as :symbol, not only in the message — the self-run
+       ;; found every complexity finding carrying :symbol nil
+       :symbol  (some-> (:name u) symbol)
+       :line    (:line u) :col 1 :end-line (:line u) :end-col 2
+       :message (str (:name u) " has cognitive complexity " (:cognitive u)
+                     " (threshold " threshold "); cyclomatic " (:cyclomatic u)
+                     ", nesting " (:max-nesting u))
+       :cognitive (:cognitive u)
+       :function (:name u)})))
+
 (defn findings
   "Units over `threshold`, in the shape every other sift rule emits."
   ([source path] (findings source path default-threshold))
   ([source path threshold]
-   (let [{:keys [ok? functions]} (report source path)]
-     (when ok?
-       (for [u (flatten-units functions) :when (> (:cognitive u) threshold)]
-         {:rule    :cognitive-complexity
-          :evidence :parity :note "5,519/5,531 units vs cccc on defnet; Spearman 0.989 vs SonarJS on LightTable"
-          ;; the unit's name as :symbol, not only in the message — the self-run
-          ;; found every complexity finding carrying :symbol nil
-          :symbol  (some-> (:name u) symbol)
-          :line    (:line u) :col 1 :end-line (:line u) :end-col 2
-          :message (str (:name u) " has cognitive complexity " (:cognitive u)
-                        " (threshold " threshold "); cyclomatic " (:cyclomatic u)
-                        ", nesting " (:max-nesting u))
-          :cognitive (:cognitive u)
-          :function (:name u)})))))
+   (over-threshold (report source path) threshold)))

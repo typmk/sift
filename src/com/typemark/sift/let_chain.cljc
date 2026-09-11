@@ -28,8 +28,7 @@
   expand to the same form; the second is the nicer of two correct answers and
   is not what this emits."
   (:require [com.typemark.sift.zip :refer [children peel op-name list-op inside-defn?
-                                           collect binder-vec vec-pairs sexpr]]
-            [rewrite-clj.zip :as z]))
+                                           collect binder-vec vec-pairs sexpr pos-of]]))
 
 (def rule :let-as-thread)
 
@@ -62,7 +61,7 @@
                          (partition 2 1 pairs))]
           (when (and (every? some? links) (apply = links))
             (let [dir (first links)
-                  [line col] (try (z/position zloc) (catch #?(:clj Exception :cljs :default) _ [nil nil]))
+                  [line col] (or (pos-of zloc) [nil nil])
                   drop-arg (fn [[prev _] [_ rhs]]
                              (let [args (vec (rest rhs))]
                                (cons (first rhs)

@@ -26,24 +26,24 @@
   idempotent under retry — the CAS-with-a-decision idiom, lume's
   idempotency.clj: (let [decision (atom nil)] (swap! state (fn [m] … (reset!
   decision [:fresh]) …))). A retry resets the same local to the same value."
-  [nodes form]
-  (let [locals (tree/let-bound-locals nodes #{"atom" "promise" "volatile!"})]
-    (some #(and (= :list (:tag %))
-                (contains? effectful (:head %))
-                (not (and (contains? #{"reset!" "swap!" "deliver" "vreset!" "vswap!"} (:head %))
-                          (contains? locals (:text (tree/first-argument nodes %))))))
-          (tree/children-of nodes form))))
+  [nodes locals form]
+  (some #(and (= :list (:tag %))
+              (contains? effectful (:head %))
+              (not (and (contains? #{"reset!" "swap!" "deliver" "vreset!" "vswap!"} (:head %))
+                        (contains? @locals (:text (tree/first-argument nodes %))))))
+        (tree/children-of nodes form)))
 
 (defn findings
   "Concurrency findings for one parsed file."
   [nodes]
   (concat
-   (for [n (tree/lists-headed-by nodes retrying)
-         :when (effectful-call-inside? nodes n)]
-     {:rule "side-effect-in-swap"
-      :line (:line n) :col (:col n) :end-line (:end-line n) :end-col (:end-col n)
-      :message (str (:head n) " retries under contention, so the side effect inside it"
-                    " can happen more than once")})
+   (let [locals (delay (tree/let-bound-locals nodes #{"atom" "promise" "volatile!"}))]
+     (for [n (tree/lists-headed-by nodes retrying)
+           :when (effectful-call-inside? nodes locals n)]
+       {:rule "side-effect-in-swap"
+        :line (:line n) :col (:col n) :end-line (:end-line n) :end-col (:end-col n)
+        :message (str (:head n) " retries under contention, so the side effect inside it"
+                      " can happen more than once")}))
 
    (for [n (tree/lists-headed-by nodes #{"future"})
          :let [parent (->> nodes

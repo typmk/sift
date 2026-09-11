@@ -21,8 +21,7 @@
   `(if <test> (<f> <name> <args…>) <name>)` — that is exactly a cond-> pair.
   A step shaped any other way is reported without one."
   (:require [com.typemark.sift.zip :refer [children peel op-name list-op inside-defn?
-                                           collect binder-vec vec-pairs sexpr]]
-            [rewrite-clj.zip :as z]))
+                                           collect binder-vec vec-pairs sexpr pos-of]]))
 
 (def rule :cond-as-build-up)
 
@@ -55,7 +54,7 @@
         (let [cps (map #(cond-pair nm (second %)) ss)
               mechanical? (every? some? cps)
               init (second (first (filter #(= nm (first %)) pairs)))
-              [line col] (try (z/position zloc) (catch #?(:clj Exception :cljs :default) _ [nil nil]))]
+              [line col] (or (pos-of zloc) [nil nil])]
           (cond-> {:rule rule :file file :line line :column col
                    :symbol (str nm) :shape rule
                    :message (str nm " is conditionally rebound " (count ss)

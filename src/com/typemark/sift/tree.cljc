@@ -15,15 +15,28 @@
   (or (contains? literal-types type)
       (contains? #{:quote :syntax-quote} tag)))
 
-(defn children-of
-  "Nodes strictly inside `n`. The flat stream keeps document order, so a
-  node's subtree is what starts after it and ends within it."
+(defn- own-index
+  "`n`'s :index when `nodes` is the vector `parse` built and `n` sits at that
+  index in it, else nil."
   [nodes n]
-  (->> nodes
-       (filter #(and (or (> (:line %) (:line n))
-                         (and (= (:line %) (:line n)) (> (:col %) (:col n))))
-                     (<= (:end-line %) (:end-line n))))
-       distinct))
+  (let [i (:index n)]
+    (when (and i (vector? nodes) (< i (count nodes)) (identical? n (nth nodes i)))
+      i)))
+
+(defn children-of
+  "Nodes strictly inside `n`. The stream is pre-order, so a node's subtree is
+  the run `parse` recorded from :index to :last, and this slices it. A
+  stream that is not `parse`'s own vector is scanned by span, end column
+  included."
+  [nodes n]
+  (if-let [i (own-index nodes n)]
+    (subvec nodes (inc i) (inc (:last n)))
+    (->> nodes
+         (filter #(and (or (> (:line %) (:line n))
+                           (and (= (:line %) (:line n)) (> (:col %) (:col n))))
+                       (or (< (:end-line %) (:end-line n))
+                           (and (= (:end-line %) (:end-line n)) (<= (:end-col %) (:end-col n))))))
+         distinct)))
 
 (def call-tags
   "Forms that invoke: a list, and an anonymous-fn literal."

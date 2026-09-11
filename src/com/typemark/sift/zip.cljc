@@ -7,8 +7,8 @@
   is its matcher and its counterpart; what a list's head is, what `^meta`
   hides, and which forms are data belong here.
 
-  Positions are rewrite-clj's, 1-based, from `{:track-position? true}`; a
-  zipper made without it answers nil to `pos-of` and every rule still runs."
+  Positions are the parser's, 1-based, read by `pos-of` off each node's
+  metadata; no zipper here needs `{:track-position? true}`."
   (:require [rewrite-clj.zip :as z]))
 
 (defn children
@@ -33,9 +33,20 @@
    (try (z/sexpr zloc) (catch #?(:clj Exception :cljs :default) _ fallback))))
 
 (defn pos-of
-  "[row col] of a location, or nil."
+  "[row col] of a location, or nil. Read off the node's metadata, which the
+  parser writes on every node it returns, not from `z/position`, so no
+  zipper needs `{:track-position? true}`. A node built rather than parsed
+  answers nil."
   [zloc]
-  (try (z/position zloc) (catch #?(:clj Exception :cljs :default) _ nil)))
+  (when zloc
+    (let [m (meta (z/node zloc))]
+      (when (:row m) [(:row m) (:col m)]))))
+
+(defn of-root
+  "A zipper at the root of a tree `rewrite-clj.parser/parse-string-all`
+  returned, without position tracking — see `pos-of`."
+  [node]
+  (z/of-node* node))
 
 (defn same-form?
   "Two locations at the same position are the same form."

@@ -73,6 +73,8 @@
   (testing "a pure update is not flagged -- that is the whole point of swap!"
     (is (empty? (conc-for "(swap! a inc)")))
     (is (empty? (conc-for "(swap! a (fn [v] (assoc v :k 1)))"))))
+  (testing "a second swap! later on the same line is not inside the first"
+    (is (empty? (conc-for "(if f (swap! a assoc k f) (swap! a dissoc k))"))))
   (testing "a future used as a statement swallows its exception"
     (is (contains? (conc-for "(do (future (risky!)) :ok)") "discarded-future")))
   (testing "a future whose value is taken is fine"

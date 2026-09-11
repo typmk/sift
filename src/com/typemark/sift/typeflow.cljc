@@ -199,7 +199,7 @@
               :when (and nm (not= "&" nm))]
           [nm t])))
 
-(declare tag-of bind-env interop-kind receiver-known? defn-forms predictions* thread-tag imports-of)
+(declare tag-of bind-env interop-kind receiver-known? defn-forms predictions* thread-tag)
 
 (defn- arith-tag
   "primitive iff every operand is — except `/` over longs, which is
@@ -316,14 +316,14 @@
           (get table (get *imports* (simple-name t)))
           (when (= 1 (count fulls)) (get table (first fulls)))))))
 
-(defn- js-aliases-of
+(defn- js-aliases-in
   "Aliases and referred names from STRING requires — (:require [\"d3\" :as d3]
   [\"@cosmograph/cosmos\" :refer [Graph]]) — which shadow-cljs tags `js`:
   `d3`, `d3/scaleSequential` and `Graph` are known receivers. A symbol
-  require is a cljs namespace and its vars are typed by their own tags."
-  [zloc]
-  (let [ns-form (some->> (when zloc (collect zloc #(= "ns" (head-name %)))) first)
-        form (when ns-form (sexpr ns-form ::no))]
+  require is a cljs namespace and its vars are typed by their own tags.
+  `ns-form` is the ns form's location, from `ns-form-of`."
+  [ns-form]
+  (let [form (when ns-form (sexpr ns-form ::no))]
     (if (or (nil? form) (= ::no form) (not (seq? form)))
       #{}
       (into #{}
@@ -354,7 +354,25 @@
   walks — see `tags`."
   false)
 
-(declare predictions*)
+(declare predictions predictions-at inferred-at ns-env)
+
+(defn- resolve-for
+  "This file's entry in a `resolve/index`, whose keys are however clj-kondo
+  was invoked — matched by suffix, either way round — or nil."
+  [path resolution]
+  (when resolution
+    (some (fn [[k v]] (when (or (str/ends-with? (str path) k) (str/ends-with? k (str path))) v)) resolution)))
+
+(defn- root-of
+  "A zipper at the root of `text`'s forms, or nil when it does not read."
+  [text]
+  (try (z/up (z/of-string text)) (catch #?(:clj Exception :cljs :default) _ nil)))
+
+(defn tags-of
+  "`tags` out of predictions walked with `:annotate? true`."
+  [preds]
+  (into {} (for [p preds :when (= ::tag (:kind p))]
+             [[(:line p) (:column p)] (:tag p)])))
 
 (defn tags
   "{[line col] tag} for every list and symbol under every top-level form —
@@ -362,18 +380,14 @@
   a rule written as data can ask what a receiver is. `opts` as for
   `predictions`. Untyped positions are present with nil."
   ([text path] (tags text path nil))
-  ([text path {:keys [var-tags classes externs resolution]}]
-   (binding [*var-tags* var-tags *classes* classes *externs* externs *annotate* true
-             *resolve* (when resolution
-                         (some (fn [[k v]] (when (or (str/ends-with? (str path) k) (str/ends-with? k (str path))) v)) resolution))]
-     (into {} (for [p (predictions* text path (host-of path)) :when (= ::tag (:kind p))]
-                [[(:line p) (:column p)] (:tag p)])))))
+  ([text path opts]
+   (tags-of (predictions text path (host-of path) (assoc opts :annotate? true)))))
 
 (defn imports
   "{simple full} from a source's ns :import — public for data.cljc's head
   resolution, so a rule names a class once, in full."
   [text]
-  (imports-of (try (z/up (z/of-string text)) (catch #?(:clj Exception :cljs :default) _ nil))))
+  (:imports (ns-env (root-of text))))
 
 (defn assignable-to?
   "Is a value tagged `tag` assignable to class `target` by the oracle's
@@ -386,11 +400,11 @@
        (or (= (simple-name tag) (simple-name target))
            (some #{(simple-name target)} (:supers (class-entry tag))))))))
 
-(defn- imports-of
-  "{simple full} from an ns form's :import clauses."
-  [zloc]
-  (let [ns-form (some->> (when zloc (collect zloc #(= "ns" (head-name %)))) first)
-        form (when ns-form (sexpr ns-form ::no))]
+(defn- imports-in
+  "{simple full} from an ns form's :import clauses. `ns-form` is the form's
+  location, from `ns-form-of`."
+  [ns-form]
+  (let [form (when ns-form (sexpr ns-form ::no))]
     (if (or (nil? form) (= ::no form) (not (seq? form)))
       {}
       (into {}
@@ -1004,8 +1018,22 @@
 (defn- defn-forms [zloc]
   (collect zloc (fn [c] (contains? #{"defn" "defn-" "defmethod" "defmacro"} (head-name c)))))
 
-(defn- ns-name-of [zloc]
-  (some->> (when zloc (collect zloc #(= "ns" (head-name %)))) first children second token-name))
+(defn- ns-form-of
+  "The location of the first (ns …) form under `zloc`, or nil."
+  [zloc]
+  (some->> (when zloc (collect zloc #(= "ns" (head-name %)))) first))
+
+(defn- ns-name-in [ns-form]
+  (some->> ns-form children second token-name))
+
+(defn ns-env
+  "{:ns-name :imports :js-aliases} for a root zipper, finding the ns form
+  once for all three."
+  [zloc]
+  (let [ns-form (ns-form-of zloc)]
+    {:ns-name (ns-name-in ns-form)
+     :imports (imports-in ns-form)
+     :js-aliases (js-aliases-in ns-form)}))
 
 (defn var-tags
   "RETIRED 2026-08-28: the oracle's :vars carries the corpus's own return
@@ -1039,26 +1067,29 @@
   hinted return is DECLARED and the indexer's; only the unhinted ones are
   inferred here. `opts` as for `predictions`."
   ([text path] (inferred text path nil))
-  ([text path {:keys [var-tags classes externs resolution]}]
-   (let [host (host-of path)
-         zloc (try (z/up (z/of-string text {:track-position? true}))
-                   (catch #?(:clj Exception :cljs :default) _ nil))]
-     (if-not zloc
-       []
-       (binding [*var-tags* var-tags *classes* classes *externs* externs
-                 *resolve* (when resolution
-                             (some (fn [[k v]] (when (or (str/ends-with? (str path) k) (str/ends-with? k (str path))) v)) resolution))
-                 *ns-name* (ns-name-of zloc)
-                 *imports* (imports-of zloc)
-                 *js-aliases* (js-aliases-of zloc)]
-         (vec (for [d (->> (children zloc) (map peel) (filter #(and % (z/list? %) (contains? #{"defn" "defn-"} (head-name %)))))
-                    :let [[_ nm & rest] (children d)
-                          argv (some (fn [x] (when (z/vector? (peel x)) x)) rest)
-                          declared? (or (hint-of nm) (some-> argv hint-of))
-                          [line _] (pos-of d)]
-                    :when (and (token-name nm) (not declared?))
-                    t (distinct (return-tag host d))]
-                {:name (token-name nm) :line line :slot -1 :type t})))))))
+  ([text path opts] (inferred-at (root-of text) path opts)))
+
+(defn inferred-at
+  "`inferred` over a root zipper the caller already made. `opts` as for
+  `predictions-at`."
+  [zloc path {:keys [var-tags classes externs resolution] :as opts}]
+  (if-not zloc
+    []
+    (let [host (host-of path)
+          {:keys [ns-name imports js-aliases]} (or (:ns-env opts) (ns-env zloc))]
+      (binding [*var-tags* var-tags *classes* classes *externs* externs
+                *resolve* (resolve-for path resolution)
+                *ns-name* ns-name
+                *imports* imports
+                *js-aliases* js-aliases]
+        (vec (for [d (->> (children zloc) (map peel) (filter #(and % (z/list? %) (contains? #{"defn" "defn-"} (head-name %)))))
+                   :let [[_ nm & rest] (children d)
+                         argv (some (fn [x] (when (z/vector? (peel x)) x)) rest)
+                         declared? (or (hint-of nm) (some-> argv hint-of))
+                         [line _] (pos-of d)]
+                   :when (and (token-name nm) (not declared?))
+                   t (distinct (return-tag host d))]
+               {:name (token-name nm) :line line :slot -1 :type t}))))))
 
 (defn predictions
   "Source -> [{:kind :line :column :op :tags/:receiver :in \"name\"} …] for
@@ -1066,14 +1097,20 @@
   see `*var-tags*` and `*resolve*`."
   ([text path] (predictions text path (host-of path)))
   ([text path host] (predictions text path host nil))
-  ([text path host {:keys [var-tags classes externs resolution]}]
-   (binding [*var-tags* var-tags
-             *classes* classes
-             *externs* externs
-             *annotate* false
-             *resolve* (when resolution
-                         (some (fn [[k v]] (when (or (str/ends-with? (str path) k) (str/ends-with? k (str path))) v)) resolution))]
-     (predictions* text path host))))
+  ([text path host opts] (predictions-at (root-of text) path host opts)))
+
+(defn predictions-at
+  "`predictions` over a root zipper the caller already made: the one walk
+  `analyze` reads its findings, its tags and the two host rules from.
+  `opts` as for `predictions`, plus `:annotate? true` for the ::tag entries
+  `tags-of` reads and `:ns-env` when the caller has it."
+  [zloc path host {:keys [var-tags classes externs resolution annotate?] :as opts}]
+  (binding [*var-tags* var-tags
+            *classes* classes
+            *externs* externs
+            *annotate* (boolean annotate?)
+            *resolve* (resolve-for path resolution)]
+    (predictions* zloc path host (:ns-env opts))))
 
 (defn- reflection-unwarned
   "A file with interop calls and no (set! <the host's switch> true): every
@@ -1095,15 +1132,13 @@
             :counterpart (list 'set! (symbol switch) true)}])))))
 
 (defn- predictions*
-  [text path host]
-  (let [zloc (try (z/of-string text {:track-position? true})
-                  (catch #?(:clj Exception :cljs :default) _ nil))
-        zloc (when zloc (z/up zloc))]
-    (if-not zloc
-      []
-      (binding [*ns-name* (ns-name-of zloc)
-                *imports* (imports-of zloc)
-                *js-aliases* (js-aliases-of zloc)
+  [zloc path host env]
+  (if-not zloc
+    []
+    (let [{:keys [ns-name imports js-aliases]} (or env (ns-env zloc))]
+      (binding [*ns-name* ns-name
+                *imports* imports
+                *js-aliases* js-aliases
                 *tag-keywords* (get-in hosts [host :tag-keywords] #{})]
        ;; EVERY top-level form: the compiler compiles (register-converter :k
        ;; (fn [bpm] (/ 60000 bpm))) as surely as a defn, and kora's ten misses
@@ -1131,31 +1166,39 @@
    :reflection-unwarned   {:category :warning :evidence :corpus
                            :instruction "Add (set! *warn-on-reflection* true) after the ns form so the compiler reports each reflective interop call."}})
 
+(defn findings-of
+  "Predictions as findings, one rule per kind under :typeflow/, plus the two
+  host rules above under their own ids, from a walk already made. The ::tag
+  entries an annotated walk carries are not findings."
+  [preds]
+  (for [{:keys [kind line column op tags receiver in prop counterpart count]} preds
+        :when (not= ::tag kind)]
+    (case kind
+      :js-prop-on-own-object
+      {:rule :js-prop-on-own-object :family :typeflow :line line :column column
+       :symbol (some-> receiver symbol) :shape :js-prop-on-own-object
+       :message (str ".-" prop " on " receiver ", which #js built here: :advanced renames one side")
+       :applicability :machine-applicable :counterpart counterpart
+       :category :warning :instruction (get-in rules [:js-prop-on-own-object :instruction])}
+      :reflection-unwarned
+      {:rule :reflection-unwarned :family :typeflow :line line :column column
+       :symbol '*warn-on-reflection* :shape :reflection-unwarned
+       :message (str count " interop calls and no (set! *warn-on-reflection* true); reflective ones are silent")
+       :applicability :unspecified :counterpart counterpart
+       :category :warning :instruction (get-in rules [:reflection-unwarned :instruction])}
+      {:rule (keyword "typeflow" (name kind)) :family :typeflow
+       :line line :column column
+       :symbol (some-> in symbol)
+       :message (case kind
+                  :boxed-math (str op " over " (str/join ", " (map #(or % "Object") tags)) " boxes; hint or cast the operands")
+                  :reflection (str op " on " receiver " reflects; its tag is not known here")
+                  :uninferred (str op " on " receiver ": Closure cannot infer the target; hint ^js or use a js/ global"))
+       :applicability :unspecified})))
+
 (defn findings
   "Predictions as findings, one rule per kind under :typeflow/, plus the two
   host rules above under their own ids. `opts` as for `predictions`:
   {:var-tags {} :resolution idx}."
   ([text path] (findings text path nil))
   ([text path opts]
-   (for [{:keys [kind line column op tags receiver in prop counterpart count]} (predictions text path (host-of path) opts)]
-     (case kind
-       :js-prop-on-own-object
-       {:rule :js-prop-on-own-object :family :typeflow :line line :column column
-        :symbol (some-> receiver symbol) :shape :js-prop-on-own-object
-        :message (str ".-" prop " on " receiver ", which #js built here: :advanced renames one side")
-        :applicability :machine-applicable :counterpart counterpart
-        :category :warning :instruction (get-in rules [:js-prop-on-own-object :instruction])}
-       :reflection-unwarned
-       {:rule :reflection-unwarned :family :typeflow :line line :column column
-        :symbol '*warn-on-reflection* :shape :reflection-unwarned
-        :message (str count " interop calls and no (set! *warn-on-reflection* true); reflective ones are silent")
-        :applicability :unspecified :counterpart counterpart
-        :category :warning :instruction (get-in rules [:reflection-unwarned :instruction])}
-       {:rule (keyword "typeflow" (name kind)) :family :typeflow
-        :line line :column column
-        :symbol (some-> in symbol)
-        :message (case kind
-                   :boxed-math (str op " over " (str/join ", " (map #(or % "Object") tags)) " boxes; hint or cast the operands")
-                   :reflection (str op " on " receiver " reflects; its tag is not known here")
-                   :uninferred (str op " on " receiver ": Closure cannot infer the target; hint ^js or use a js/ global"))
-        :applicability :unspecified}))))
+   (findings-of (predictions text path (host-of path) opts))))

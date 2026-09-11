@@ -42,7 +42,8 @@
             [com.typemark.sift.shape :as shape]
             [com.typemark.sift.tests :as tests]
             [com.typemark.sift.typeflow :as typeflow]
-            [com.typemark.sift.web :as web]))
+            [com.typemark.sift.web :as web]
+            [com.typemark.sift.zip :as sz]))
 
 ;; ── structure ──────────────────────────────────────────────────────────────
 
@@ -249,35 +250,41 @@
   wants one family filters on :family — :node :shape :complexity :prose —
   rather than calling four functions."
   [{:keys [text path test? resolution prose var-tags classes loaded tenanted?] :or {tenanted? true}}]
-  (let [{:keys [ok? nodes error]} (p/parse text)]
+  (let [{:keys [ok? root nodes error]} (p/parse-root text)]
     (if-not ok?
       {:ok? false :error (or error "unparseable")}
-      (let [node   (concat (for [[cat f] node-rules
+      (let [zloc   (sz/of-root root)
+            jvm?   (= :jvm (typeflow/host-of path))
+            topts  {:var-tags var-tags :classes classes :resolution resolution
+                    :ns-env (typeflow/ns-env zloc)
+                    :annotate? jvm?}
+            preds  (typeflow/predictions-at zloc path (typeflow/host-of path) topts)
+            tflow  (typeflow/findings-of preds)
+            node   (concat (for [[cat f] node-rules
                                  ;; the one rule with a corpus-level switch — see access/tenanted?
                                  x (if (= f access/findings) (f nodes :tenanted? tenanted?) (f nodes))]
                              (normalize :node cat x))
                            (when test? (map #(normalize :node :design %) (tests/findings nodes))))
             ;; the data engine reads typeflow's tag environment and the oracle's
             ;; table, so a rule as data can ask what a receiver is
-            shape  (binding [data/*tags* (when (= :jvm (typeflow/host-of path))
-                                           (typeflow/tags text path {:var-tags var-tags :classes classes :resolution resolution}))
+            shape  (binding [data/*tags* (when jvm? (typeflow/tags-of preds))
                              data/*classes* classes
-                             data/*imports* (typeflow/imports text)]
-                     (doall (map #(normalize :shape :refactor %) (shape/findings text path resolution))))
-            cx     (complexity/report text path)
+                             data/*imports* (:imports (:ns-env topts))]
+                     (doall (map #(normalize :shape :refactor %) (shape/findings-at zloc path resolution tflow))))
+            cx     (complexity/report-of root path)
             over   (map #(normalize :complexity :refactor
                                     (assoc % :category :refactor
                                              :instruction "Split the unit: one branch per helper, or lift the nested lambda that carries the score."))
-                        (complexity/findings text path))
+                        (complexity/over-threshold cx complexity/default-threshold))
             doc    (map #(normalize :prose :readability %) (prose-for prose path))
-            flow   (->> (typeflow/findings text path {:var-tags var-tags :classes classes :resolution resolution})
+            flow   (->> tflow
                         ;; the two host rules already arrive via shape/findings
                         (remove #(contains? #{:js-prop-on-own-object :reflection-unwarned} (:rule %)))
                         (map #(normalize :typeflow :warning
                                          (assoc % :instruction "Hint the receiver or operands (^String s, ^long n), or cast (long x); the host compiler takes the slow path where the tag runs out.")))
                         ;; without bin/oracle's table the walker still runs, but what it
                         ;; says was not judged the way the :compiler rung means: say so
-                        (map #(cond (and (nil? classes) (= :jvm (typeflow/host-of path)))
+                        (map #(cond (and (nil? classes) jvm?)
                                     (assoc % :evidence :unjudged :note "no oracle; run sift/bin/oracle in the project")
                                     ;; the oracle exists but the compiler never loaded THIS file —
                                     ;; sonar-clojure's 14 files that need the plugin's classpath — so

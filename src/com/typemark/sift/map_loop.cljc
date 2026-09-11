@@ -3,8 +3,7 @@
 
    Bindings: a seq and an out starting at []. Recur is (rest/next xs) plus
    (conj out expr). C3 / BFS / retry do not match that."
-  (:require [com.typemark.sift.zip :refer [peel list-op op-name call? inside-defn? collect two-binds single-body]]
-            [rewrite-clj.zip :as z]))
+  (:require [com.typemark.sift.zip :refer [peel list-op op-name call? inside-defn? collect two-binds single-body pos-of]]))
 
 (def rule :loop-as-map)
 
@@ -110,7 +109,7 @@
 (defn- finding [file zloc binds]
   (when-let [{:keys [xs src out xs-first?]} (classify-binds binds)]
     (when-let [{:keys [expr el pred]} (match-if (single-body zloc) xs out xs-first?)]
-      (let [[line col] (try (z/position zloc) (catch #?(:clj Exception :cljs :default) _ [nil nil]))
+      (let [[line col] (or (pos-of zloc) [nil nil])
             cp (counterpart src expr xs el pred)]
         (cond-> {:rule rule
                  :file file

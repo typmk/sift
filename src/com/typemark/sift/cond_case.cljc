@@ -15,7 +15,7 @@
   default THROWS. The counterpart carries an explicit `nil` default for that
   reason — measured in clojure.core itself, two of seven hits had no `:else`,
   and the shorter rewrite would have changed what they return."
-  (:require [com.typemark.sift.zip :refer [children peel list-op op-name inside-defn? collect]]
+  (:require [com.typemark.sift.zip :refer [children peel list-op op-name inside-defn? collect pos-of]]
             [rewrite-clj.zip :as z]))
 
 (def rule :cond-as-case)
@@ -60,7 +60,7 @@
         (let [x (ffirst tests)
               ks (map second tests)
               mechanical? (every? case-key? ks)
-              [line col] (try (z/position zloc) (catch #?(:clj Exception :cljs :default) _ [nil nil]))]
+              [line col] (or (pos-of zloc) [nil nil])]
           (cond-> {:rule rule
                    :file file
                    :line line

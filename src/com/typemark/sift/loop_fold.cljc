@@ -17,8 +17,7 @@
   mentions the seq — `(first xs)` became the element — otherwise a `maybe`
   with the form still attached. `loop-as-map` runs first and owns the
   `[]`/`conj` special case; this rule skips a loop that one already named."
-  (:require [com.typemark.sift.zip :refer [peel list-op op-name call? inside-defn? collect two-binds single-body]]
-            [rewrite-clj.zip :as z]))
+  (:require [com.typemark.sift.zip :refer [peel list-op op-name call? inside-defn? collect two-binds single-body pos-of]]))
 
 (def rule :loop-as-reduce)
 
@@ -92,7 +91,7 @@
             (let [x (or el 'x)
                   body' (rewrite expr xs el x)
                   mechanical? (and (mentions? body' acc) (not (mentions? body' xs)))
-                  [line col] (try (z/position zloc) (catch #?(:clj Exception :cljs :default) _ [nil nil]))]
+                  [line col] (or (pos-of zloc) [nil nil])]
               {:rule rule
                :file file
                :line line
@@ -111,7 +110,7 @@
   ([file zloc taken]
    (vec (keep (fn [lz]
                 (when (and (inside-defn? lz)
-                           (not (contains? taken (try (z/position lz) (catch #?(:clj Exception :cljs :default) _ nil)))))
+                           (not (contains? taken (pos-of lz))))
                   (when-let [b (two-binds lz)]
                     (finding file lz b))))
               (collect zloc (fn [z] (= "loop" (op-name (list-op z)))))))))

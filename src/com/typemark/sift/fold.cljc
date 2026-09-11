@@ -35,7 +35,7 @@
   "`clojure.core/atom` for a call form kondo resolved, nil otherwise."
   [list-zloc]
   (when *resolve*
-    (get (:vars *resolve*) (try (z/position list-zloc) (catch #?(:clj Exception :cljs :default) _ nil)))))
+    (get (:vars *resolve*) (pos-of list-zloc))))
 
 (defn- local-call?
   "kondo says the head of this call form is a LOCAL — a parameter named
@@ -43,8 +43,7 @@
   the call form's position, the same as a var usage."
   [list-zloc]
   (when *resolve*
-    (contains? (:locals *resolve*)
-               (try (z/position list-zloc) (catch #?(:clj Exception :cljs :default) _ nil)))))
+    (contains? (:locals *resolve*) (pos-of list-zloc))))
 
 (defn- core-call?
   "Is this list a call to clojure.core/<n>? Resolution first, text second."

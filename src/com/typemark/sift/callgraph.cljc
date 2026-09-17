@@ -105,12 +105,15 @@
                  :owner [(get p "impl-ns")
                          (str (get p "protocol-name") "/" (get p "method-name"))]
                  :via  [(get p "protocol-ns") (get p "method-name")]})
+        ;; The arm belongs to the MULTIMETHOD's namespace, not the file's. A
+        ;; defmethod in another file extends that multi, so its identity lives
+        ;; where the defmulti does -- which is also how defnet names it.
         arms  (for [u (get a "var-usages" [])
                     :let [nm (arm-name u)]
                     :when nm]
                 {:file (get u "filename")
                  :from (row-of u)
-                 :owner [(get u "from") nm]
+                 :owner [(get u "to") nm]
                  :via  [(get u "to") (get u "name")]})
         starts (reduce (fn [m x]
                          (if (and (:file x) (:from x))

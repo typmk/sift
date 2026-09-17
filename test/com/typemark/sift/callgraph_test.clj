@@ -160,3 +160,33 @@
     (testing "and owns its own body, not the computed arm's"
       (is (= #{["probe" "other"]}
              (set (map :callee (get g ["c" "handle::[:a :b]"]))))))))
+
+;; An arm belongs to the multimethod's namespace, not the file it is written
+;; in. A defmethod in another file extends THAT multi, so its identity lives
+;; where the defmulti does. Same-namespace fixtures cannot tell the two apart,
+;; which is why this one is cross-namespace.
+
+(def foreign-arm
+  (str "{\"analysis\":{"
+       "\"var-definitions\":["
+       "{\"filename\":\"e.clj\",\"ns\":\"e\",\"name\":\"sink\",\"row\":50}],"
+       "\"var-usages\":["
+       "{\"filename\":\"e.clj\",\"from\":\"e\",\"to\":\"core\",\"name\":\"handle\","
+       "\"defmethod\":true,\"dispatch-val-str\":\":here\","
+       "\"row\":10,\"name-row\":10,\"name-col\":12,\"name-end-row\":10,\"name-end-col\":18},"
+       "{\"filename\":\"e.clj\",\"from\":\"e\",\"to\":\"probe\",\"name\":\"danger\","
+       "\"row\":11,\"name-row\":11,\"name-col\":5,\"name-end-row\":11,\"name-end-col\":11}"
+       "]}}"))
+
+(deftest an-arm-is-named-in-the-multimethods-namespace-not-the-files
+  (let [g (cg/call-graph foreign-arm)]
+    (testing "the arm hangs off the multi's namespace"
+      (is (contains? g ["core" "handle::here"])))
+    (testing "never off the namespace the defmethod is written in"
+      (is (not (contains? g ["e" "handle::here"]))))
+    (testing "and the multi reaches it, so a caller can taint through dispatch"
+      (is (contains? (set (map :callee (get g ["core" "handle"])))
+                     ["core" "handle::here"])))
+    (testing "the body's call is still owned by the arm"
+      (is (= #{["probe" "danger"]}
+             (set (map :callee (get g ["core" "handle::here"]))))))))

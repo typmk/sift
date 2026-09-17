@@ -120,3 +120,43 @@
     (testing "the multimethod taints because the arm it dispatches to does"
       (is (contains? taints ["h" "handle::upload"]))
       (is (contains? taints ["h" "handle"])))))
+
+;; A dispatch value that is a FORM names nothing. Taking its text gave
+;; `handle::(:k m)`, a node shaped like an arm that names no arm -- and defnet's
+;; parser, which this join is keyed against, stopped minting those on
+;; 2026-09-17. MEASURED on lume: 42 defmethod-marked usages, 40 literal, 2 not.
+
+(def computed-arm
+  (str "{\"analysis\":{"
+       "\"var-definitions\":["
+       "{\"filename\":\"c.clj\",\"ns\":\"c\",\"name\":\"after\",\"row\":40}],"
+       "\"var-usages\":["
+       "{\"filename\":\"c.clj\",\"from\":\"c\",\"to\":\"c\",\"name\":\"handle\","
+       "\"defmethod\":true,\"dispatch-val-str\":\"(:flaky ops)\","
+       "\"row\":20,\"name-row\":20,\"name-col\":12,\"name-end-row\":20,\"name-end-col\":18},"
+       "{\"filename\":\"c.clj\",\"from\":\"c\",\"to\":\"probe\",\"name\":\"sink\","
+       "\"row\":21,\"name-row\":21,\"name-col\":5,\"name-end-row\":21,\"name-end-col\":9},"
+       "{\"filename\":\"c.clj\",\"from\":\"c\",\"to\":\"c\",\"name\":\"handle\","
+       "\"defmethod\":true,\"dispatch-val-str\":\"[:a :b]\","
+       "\"row\":30,\"name-row\":30,\"name-col\":12,\"name-end-row\":30,\"name-end-col\":18},"
+       "{\"filename\":\"c.clj\",\"from\":\"c\",\"to\":\"probe\",\"name\":\"other\","
+       "\"row\":31,\"name-row\":31,\"name-col\":5,\"name-end-row\":31,\"name-end-col\":10}"
+       "]}}"))
+
+(deftest a-computed-dispatch-value-is-not-taken-as-a-name
+  (let [g (cg/call-graph computed-arm)]
+    (testing "the form is not spelled into the node name"
+      (is (not (contains? g ["c" "handle::(:flaky ops)"]))))
+    (testing "the arm is kept under the name defnet gives it, so the two join"
+      (is (contains? g ["c" "handle::<computed>"])))
+    (testing "and still owns the call in its body, which is the whole point"
+      (is (= #{["probe" "sink"]}
+             (set (map :callee (get g ["c" "handle::<computed>"]))))))))
+
+(deftest a-vector-dispatch-value-is-still-a-name
+  (let [g (cg/call-graph computed-arm)]
+    (testing "isa? dispatch is a literal, and defnet admits it too"
+      (is (contains? g ["c" "handle::[:a :b]"])))
+    (testing "and owns its own body, not the computed arm's"
+      (is (= #{["probe" "other"]}
+             (set (map :callee (get g ["c" "handle::[:a :b]"]))))))))

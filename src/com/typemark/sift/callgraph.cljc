@@ -32,18 +32,44 @@
 
 (defn- row-of [m] (or (get m "row") (get m "name-row")))
 
+(def ^:private computed-dispatch
+  "What an arm is called when its dispatch value is not a literal. The same
+  string defnet's parser uses, so the two name the same arm."
+  "<computed>")
+
+(defn- literal-dispatch?
+  "Whether this `dispatch-val-str` is a value rather than a form to evaluate.
+
+  defnet decides this on the tree-sitter node type; kondo gives text only, so
+  this reads the text. A string literal is admitted whole, because its contents
+  may spell anything; otherwise a form, a set, a map or a reader macro is not a
+  name. `[::a ::b]` stays a name -- vector dispatch is `isa?` dispatch, and
+  defnet admits it too."
+  [d]
+  (and (seq d)
+       (or (= \" (first d))
+           (not (some #{\( \) \{ \} \~ \@ \` \#} d)))))
+
 (defn- arm-name
   "The name of one multimethod arm, or nil for any other usage.
 
   clj-kondo marks the usage of the multimethod inside each `defmethod` with
   `defmethod` and `dispatch-val-str`. A keyword dispatch value carries its own
   colon and the separator supplies one, so it is stripped -- the result equals
-  the node name defnet's parser gives the same arm."
+  the node name defnet's parser gives the same arm.
+
+  A dispatch value that is a FORM names nothing, and taking its text produced
+  `handle::(:k m)`, a node shaped like an arm that names no arm. defnet stopped
+  minting those on 2026-09-17 and calls them `<computed>`; this follows, or the
+  two disagree about exactly the arms that are hardest to see. MEASURED on
+  lume's analysis: 42 defmethod-marked usages, 40 literal and 2 not, both
+  `(:flaky ops)`."
   [u]
   (when (get u "defmethod")
     (let [d (get u "dispatch-val-str")
           d (if (and d (= \: (first d))) (subs d 1) d)]
-      (when (seq d) (str (get u "name") "::" d)))))
+      (when (seq d)
+        (str (get u "name") "::" (if (literal-dispatch? d) d computed-dispatch))))))
 
 (defn- owner-regions
   "The spans clj-kondo attributes no `from-var` to, and who owns each.

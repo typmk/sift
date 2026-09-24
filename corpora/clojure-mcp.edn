@@ -1,0 +1,10 @@
+;; a corpus bin/validate judges typeflow on. :role is the honest label —
+;; :in-sample was learned from, :held-out was judged after the rules were
+;; written, :blind was never read before its first score was recorded.
+{:name "clojure-mcp"
+ :root "~/.cache/sift/corpora/clojure-mcp/src"
+ :oracle "~/.cache/sift/oracles/clojure-mcp"
+ ;; first score, before any of it was read (2026-08-27): boxed 79/79,
+ ;; reflection P 0.92 R 0.75. Read and learned from since; a role only
+ ;; moves this way.
+ :role :in-sample}

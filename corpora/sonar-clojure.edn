@@ -1,0 +1,12 @@
+;; a corpus bin/validate judges typeflow on. :role is the honest label —
+;; :in-sample was learned from, :held-out was judged after the rules were
+;; written, :blind was never read before its first score was recorded.
+{:name "sonar-clojure"
+ :root "~/.cache/sift/corpora/sonar-clojure/src"
+ :oracle "~/.cache/sift/oracles/sonar-clojure"
+ ;; first score (2026-08-28): boxed 11/12, reflection 0 oracle / 5 predicted —
+ ;; and the five were the INSTRUMENT: bin/oracle had thrown on the 14
+ ;; namespaces the plain classpath cannot load (Sonar's API) and written no
+ ;; tags.edn, so the run was judged with no table. With the table, 11/11
+ ;; and 0/0. 12 of 26 files load outside the plugin's classpath.
+ :role :held-out}

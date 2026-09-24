@@ -1,0 +1,68 @@
+# The suite is the gate; bin/validate is the measurement and needs oracle
+# dumps that live outside the repo, so it does not run here.
+name: ci
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: DeLaGuardo/setup-clojure@13.4
+        with:
+          cli: latest
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.m2/repository
+            ~/.gitlibs
+          key: cdeps-${{ hashFiles('deps.edn') }}
+          restore-keys: cdeps-
+      - run: clojure -M:test
+
+  # "runs on the JVM and as ClojureScript": every corpus file through
+  # sift/analyze on both, and the two outputs must be identical.
+  parity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: DeLaGuardo/setup-clojure@13.4
+        with:
+          cli: latest
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.m2/repository
+            ~/.gitlibs
+          key: cdeps-${{ hashFiles('deps.edn') }}
+          restore-keys: cdeps-
+      - run: clojure -M:parity > jvm.edn
+      - run: clojure -M:cljs && node target/parity.js > node.edn
+      - run: test -s jvm.edn && diff jvm.edn node.edn
+
+  # bin/sift under babashka: the flag corpus must report and the clear corpus
+  # must not, per category. performance needs an oracle to be silent and
+  # documentation needs clj-kondo's analysis, so neither is checked here.
+  cli:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeLaGuardo/setup-clojure@13.4
+        with:
+          bb: latest
+      - run: |
+          c=test/net/typemark/sift/corpus
+          for k in refactor complexity security correctness; do bin/sift lint --category $k $c/clear; done
+          for k in refactor security; do
+            if bin/sift lint --category $k $c/flag > /dev/null; then echo "flag corpus reported no $k finding"; exit 1; fi
+          done

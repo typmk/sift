@@ -1,0 +1,152 @@
+;; What each host makes of a tag. typeflow.cljc reads this; the flow itself
+;; is host-neutral and a dialect is a row here, not a namespace.
+;;
+;;   :primitives   tags the compiler keeps unboxed — a math op over only these
+;;                 is unboxed, over anything else is boxed (JVM). JS has one
+;;                 number and no boxing: the set is empty and boxed-math is
+;;                 not a question.
+;;   :literal      the tag a literal carries, by reader kind.
+;;   :casts        core fns whose result is the named primitive.
+;;   :core         return tags for core fns whose result the compiler knows.
+;;                 :arith means "primitive iff every operand is primitive" —
+;;                 Numbers.add(long,long) against Numbers.add(Object,Object).
+;;   :math         the ops the JVM compiles through clojure.lang.Numbers and
+;;                 warns on when boxed; compared as :arith.
+;;   :interop      how a call names the host: instance call / field / static /
+;;                 constructor, as a regex over the head symbol.
+;;   :known-receiver  hints that make a receiver known to the host compiler
+;;                 without a class: ^js on ClojureScript.
+;;   :warns        which predictions this host's compiler actually emits, so a
+;;                 prediction with no oracle is not reported as a fact.
+;;
+;; The six below carried the last of typeflow's host branches. The flow was
+;; already host-neutral -- 20 mentions of a host in 1,125 lines, of which 8
+;; were real branches -- and each of those 8 is now one of these keys, so a
+;; dialect is a row here and nowhere else. bin/validate is the proof: every
+;; corpus scored identically before and after.
+;;
+;;   :files        the extensions that compile for this host. host-of reads
+;;                 them; the row with :default true answers for the rest, so
+;;                 .clj and .cljc still score for the JVM.
+;;   :feature      the reader-conditional key this host answers to. #?(:clj a
+;;                 :cljs b) is a defmethod the reader evaluates and this is
+;;                 its dispatch value.
+;;   :tag-keywords bare keyword metadata that reads as a TYPE -- ^js on
+;;                 ClojureScript. ^:private and ^:const are not tags, and
+;;                 var-tags read "private" as a return class until this said
+;;                 so.
+;;   :unknown-receiver  what this host calls a member call on a receiver it
+;;                 cannot type, and which allow-list suppresses it.
+;;   :implicit-calls  special forms that emit a host call the source does not
+;;                 write: with-open expands to (.close x) per binding.
+;;   :overloads    does this host resolve an overload by parameter matching?
+;;                 The TABLES here are data; the matcher is not -- judge-method
+;;                 implements the JVM's own rules and the CLR's would be a
+;;                 second function. A host without overloads needs neither.
+;;   :warn-switch  the form that makes this host's compiler report, or absent.
+;;   :string-requires  does (:require ["d3" :as d3]) name the HOST rather than
+;;                 a namespace? On ClojureScript shadow tags those `js`. A
+;;                 .cljc scored for the JVM can still hold one inside a
+;;                 reader conditional, so this is a real guard and not a
+;;                 restatement of the file extension.
+{:jvm {:primitives #{"long" "double" "int" "float" "boolean" "char" "byte" "short"}
+       ;; true/false are a BooleanExpr whose class is java.lang.Boolean — boxed,
+       ;; so (.setFlag x true) matches setFlag(Boolean) and not setFlag(boolean)
+       ;; only when both exist; numbers are primitive long/double
+       :literal {:int "long" :float "double" :string "String" :char "char"
+                 :bool "Boolean" :keyword "Keyword" :symbol "Symbol" :regex "Pattern"
+                 :vector :vector :map :map :set :set :list :list :nil "nil"
+                 ;; all-constant collections fold to the concrete class
+                 :vector-const :vector-const :map-const :map-const :set-const :set-const}
+       ;; what a concept or a walker tag is, as a class the dump has supers
+       ;; for — IPersistentVector is not a java.util.List, PersistentVector is
+       :concept-classes {:vector "IPersistentVector" :vector-const "PersistentVector"
+                         :map "IPersistentMap" :map-const "PersistentArrayMap"
+                         :set "IPersistentSet" :set-const "PersistentHashSet"
+                         :list "PersistentList" :seq "ISeq"
+                         "Number" "Number" "Fn" "AFunction" "js-literal" "Object"}
+       :casts {"long" "long" "int" "int" "double" "double" "float" "float"
+               "short" "short" "byte" "byte" "char" "char" "boolean" "boolean"}
+       ;; ONLY what the compiler knows WITHOUT reading a var: :inline forms and
+       ;; special forms — count, alength, not, the predicates, the math, the
+       ;; casts, fn. Everything a var carries (str, name, io/file) is in the
+       ;; oracle's :vars, read live; a hand copy of it was wrong four times
+       ;; before it was deleted (vec, list, keyword, Math/abs).
+       :core {"count" "int" "alength" "int"
+              ;; the array constructors are :inline to Numbers.*_array — typed
+              ;; by the static call, not by a var
+              "char-array" "char[]" "byte-array" "byte[]" "int-array" "int[]" "long-array" "long[]"
+              "double-array" "double[]" "boolean-array" "boolean[]" "object-array" "Object[]"
+              "fn" "AFunction" "fn*" "AFunction"
+              "boolean" "boolean" "not" "boolean" "nil?" "boolean" "some?" "boolean"
+              "empty?" "boolean" "seq?" "boolean" "map?" "boolean" "vector?" "boolean"
+              "string?" "boolean" "number?" "boolean" "keyword?" "boolean"
+              "+" :arith "-" :arith "*" :arith "/" :arith "inc" :arith "dec" :arith
+              ;; mod is a plain defn with no :inline — it never reaches Numbers
+              ;; and never warns (a production service's abn.clj:15, measured); quot and rem do
+              "quot" :arith "rem" :arith "mod" nil "max" :arith "min" :arith "abs" :arith
+              "<" "boolean" ">" "boolean" "<=" "boolean" ">=" "boolean" "==" "boolean"
+              "zero?" "boolean" "pos?" "boolean" "neg?" "boolean" "even?" "boolean" "odd?" "boolean"
+              ;; bit ops: Numbers.and(Object,Object) WARNS when an operand is
+              ;; boxed (security.cljc:67, measured) but every overload RETURNS
+              ;; long — so they are in :math and their tag is "long".
+              "bit-and" "long" "bit-or" "long" "bit-xor" "long" "bit-not" "long"
+              "bit-shift-left" "long" "bit-shift-right" "long" "unsigned-bit-shift-right" "long"}
+       ;; Numbers is reached only through :inline, and :inline-arities says
+       ;; when: comparisons, max and min at exactly two arguments, the
+       ;; operators at two or more. (<= 200 status 299) is a plain call to
+       ;; clojure.core/<= and the compiler says nothing about it — measured
+       ;; on a production service, email.clj:167, a "false positive" that was a wrong model.
+       ;; Absent means any arity.
+       ;; max and min are nary-inline like + — (max r g b) warns three times on
+       ;; a numeric library, and this table said only two arguments did
+       :inline-arities {"mod" #{} "<" #{2} ">" #{2} "<=" #{2} ">=" #{2} "==" #{2}
+                        "max" :two-or-more "min" :two-or-more
+                        "+" :two-or-more "*" :two-or-more "/" :two-or-more "-" :one-or-more}
+       :math #{"+" "-" "*" "/" "inc" "dec" "quot" "rem" "mod" "max" "min"
+               "<" ">" "<=" ">=" "==" "zero?" "pos?" "neg?"
+               "bit-and" "bit-or" "bit-xor" "bit-not" "bit-shift-left" "bit-shift-right" "unsigned-bit-shift-right"
+               "unchecked-add" "unchecked-subtract" "unchecked-multiply" "unchecked-inc" "unchecked-dec"}
+       ;; a static call may be fully qualified — java.security.MessageDigest/getInstance
+       ;; :ctor needs a name before the dot: `..` is not a constructor, and was
+       ;; tagged "." — a known class — until clojure-mcp's (.. pb (start))
+       :interop {:instance-call "^\\.[^-]" :field "^\\.-" :static "^([a-z][a-z0-9_]*\\.)*[A-Z][A-Za-z0-9_$.]*/" :ctor "[A-Za-z0-9_$]\\.$"}
+       :known-receiver #{}
+       :warns #{:boxed-math :reflection}
+       :files #{".clj" ".cljc" ".bb"}
+       :default true
+       :feature :clj
+       :tag-keywords #{}
+       :unknown-receiver {:finding :reflection}
+       :implicit-calls {"with-open" ".close"}
+       :overloads true
+       :warn-switch "*warn-on-reflection*"}
+
+ :js  {:primitives #{}
+       :literal {:int "number" :float "number" :string "string" :char "string"
+                 :bool "boolean" :keyword "Keyword" :symbol "Symbol" :regex "RegExp"
+                 :vector :vector :map :map :set :set :list :list :nil "nil"}
+       :casts {"int" "number" "long" "number" "double" "number" "boolean" "boolean"}
+       :core {"str" "string" "name" "string" "count" "number" "+" "number" "-" "number"
+              "*" "number" "inc" "number" "dec" "number" "not" "boolean" "nil?" "boolean"
+              "vec" :vector "vector" :vector "hash-map" :map "assoc" :map "atom" "Atom"}
+       :math #{}
+       :interop {:instance-call "^\\.[^-]" :field "^\\.-" :static "^js/" :ctor "\\.$"}
+       :known-receiver #{"js"}
+       ;; cljs.analyzer/analyze-dot warns :infer-warning when the target's
+       ;; inferred tag is nil or any; shadow-cljs's :infer-externs :auto then
+       ;; keeps only the properties Closure's default externs do not already
+       ;; declare (typeflow/*externs*, from bin/oracle-js). The 648-vs-0 that
+       ;; switched this host off was an EMPTY oracle — a code-graph tool's source was
+       ;; already clean — judging a model; a ClojureScript app before its fixes has 42.
+       :warns #{:uninferred}
+       :files #{".cljs"}
+       :feature :cljs
+       :tag-keywords #{:js}
+       ;; the externs allow-list is bin/oracle-js's; without it every property
+       ;; on an untyped receiver reads as uninferred and Closure would not warn
+       :unknown-receiver {:finding :uninferred :allowlist :externs}
+       :implicit-calls {}
+       :overloads false
+       :warn-switch nil
+       :string-requires true}}

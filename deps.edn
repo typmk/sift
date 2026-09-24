@@ -1,0 +1,30 @@
+;; Clojure static analysis: clojure, rewrite-clj, and a JSON reader for
+;; clj-kondo's analysis output. Nothing else, so it runs as a JVM library, as
+;; ClojureScript and under babashka.
+{:paths ["src"]
+ :deps  {org.clojure/clojure     {:mvn/version "1.12.0"}
+         org.clojure/data.json   {:mvn/version "2.5.2"}
+         rewrite-clj/rewrite-clj {:mvn/version "1.2.55"}}
+
+
+ ;; :test is the gate, runnable from a clone of this repo alone.
+ ;;
+ ;; :parity runs every corpus file through `analyze` and prints the findings
+ ;; and unit scores as EDN; :cljs compiles the same namespace for node. CI
+ ;; diffs the two outputs.
+ :aliases
+ {:test
+  {:extra-paths ["test"]
+   :extra-deps  {org.clojure/test.check {:mvn/version "1.1.3"}
+                 io.github.cognitect-labs/test-runner
+                 {:git/tag "v0.5.1" :git/sha "dfb30dd"}}
+   :main-opts   ["-m" "cognitect.test-runner" "-d" "test"]
+   :exec-fn     cognitect.test-runner.api/test}
+  :parity
+  {:extra-paths ["test-cljs"]
+   :main-opts   ["-m" "net.typemark.sift.parity"]}
+  :cljs
+  {:extra-paths ["test-cljs"]
+   :extra-deps  {org.clojure/clojurescript {:mvn/version "1.12.42"}}
+   :main-opts   ["-m" "cljs.main" "-t" "node" "-o" "target/parity.js"
+                 "-c" "net.typemark.sift.parity"]}}}

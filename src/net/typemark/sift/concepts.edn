@@ -1,0 +1,114 @@
+;; The hand-maintained model of what a Clojure runtime must answer, each
+;; concept with its :jvm carrier (2026-08-27). typeflow reads it as the lattice
+;; above the host: a literal {} is :map, a hint ^IPersistentMap is :map, and
+;; the two meet.
+;; The reference model: what a Clojure runtime must be able to answer about a
+;; value, independent of how any host spells it.
+;;
+;; This is the ONE hand-maintained file. Everything else joins against it.
+;;
+;; :kind      :partition — clojure.core branches on it, so the distinction is
+;;                         load-bearing; removing it changes an answer.
+;;            :operation — a capability invoked, never tested for. A trait, a
+;;                         vtable slot, or a plain function serves equally.
+;; :asks      the question, in the reader's words.
+;; :branch    the clojure.core name that branches on it (partitions only).
+;; :jvm       the carrier in clojure.lang. Naming, not normative.
+;; :alias     extra spellings the normalisation cascade cannot reach on its own.
+;;            Adding one here fixes every dialect at once; per-dialect overrides
+;;            in upstreams.edn are the last resort.
+;;
+;; The cascade that consumes this: strip a leading I, drop separators and case,
+;; then match the concept id or any alias. Measured resolution is in gen/report.
+
+{:version 1
+
+ :concepts
+ [;; ---- the eleven partitions -------------------------------------------
+  {:id :seq         :kind :partition :asks "is it a seq"
+   :branch "seq?"        :jvm "ISeq"           :alias #{"sequencelike" "next"}}
+  {:id :sequential   :kind :partition :asks "does order carry meaning"
+   :branch "sequential?" :jvm "Sequential"}
+  {:id :list         :kind :partition :asks "is it a list"
+   :branch "list?"       :jvm "IPersistentList"}
+  {:id :vector       :kind :partition :asks "is it a vector"
+   :branch "vector?"     :jvm "IPersistentVector"  :alias #{"vec"}}
+  {:id :map          :kind :partition :asks "is it a map"
+   :branch "map?"        :jvm "IPersistentMap"     :alias #{"maplike" "mapequivalence" "listmap"}}
+  {:id :set          :kind :partition :asks "is it a set"
+   :branch "set?"        :jvm "IPersistentSet"     :alias #{"setlike"}}
+  {:id :map-entry    :kind :partition :asks "is it a map entry, or a two-element vector"
+   :branch "map-entry?"  :jvm "IMapEntry"}
+  {:id :record       :kind :partition :asks "is it a record"
+   :branch "record?"     :jvm "IRecord"}
+  {:id :fn           :kind :partition :asks "is it a function"
+   :branch "fn?"         :jvm "Fn"  :alias #{"clojurefn"}}
+  {:id :chunked      :kind :partition :asks "can it yield a chunk at a time"
+   :branch "chunked-seq?" :jvm "IChunkedSeq"      :alias #{"chunkable" "chunkednext"}}
+  {:id :sorted       :kind :partition :asks "does it maintain an order"
+   :branch "sorted?"     :jvm "Sorted"}
+
+  ;; ---- operations -------------------------------------------------------
+  {:id :seqable      :kind :operation :asks "can a seq be taken of it"
+   :jvm "Seqable"}
+  {:id :count        :kind :operation :asks "how many, in constant time"
+   :jvm "Counted"     :alias #{"countable"}}
+  {:id :collection   :kind :operation :asks "conj, empty, equiv"
+   :jvm "IPersistentCollection"
+   :alias #{"coll" "collectionlike" "conjable" "emptyablecollection"}}
+  {:id :lookup       :kind :operation :asks "value at a key"
+   :jvm "ILookup"     :alias #{"find"}}
+  {:id :assoc        :kind :operation :asks "a copy with a key set"
+   :jvm "Associative" :alias #{"associativelywritable"}}
+  {:id :indexed      :kind :operation :asks "value at an integer index"
+   :jvm "Indexed"     :alias #{"indexable"}}
+  {:id :stack        :kind :operation :asks "peek and pop"
+   :jvm "IPersistentStack" :alias #{"stackable"}}
+  {:id :reversible   :kind :operation :asks "a seq in reverse"
+   :jvm "Reversible"}
+  {:id :deref        :kind :operation :asks "the value inside"
+   :jvm "IDeref"      :alias #{"derefable"}}
+  {:id :blocking-deref :kind :operation :asks "the value inside, waiting"
+   :jvm "IBlockingDeref" :alias #{"derefwithtimeout"}}
+  {:id :pending      :kind :operation :asks "has it been realised"
+   :jvm "IPending"    :alias #{"realizable"}}
+  {:id :meta         :kind :operation :asks "its metadata"
+   :jvm "IMeta"       :alias #{"metadatable"}}
+  {:id :with-meta    :kind :operation :asks "a copy carrying different metadata"
+   :jvm "IObj"        :alias #{"withmeta" "metaaware"}}
+  {:id :named        :kind :operation :asks "its name and namespace"
+   :jvm "Named"       :alias #{"nameable"}}
+  {:id :hash         :kind :operation :asks "its value hash"
+   :jvm "IHashEq"     :alias #{"hash"}}
+  {:id :equiv        :kind :operation :asks "is it equal by value"
+   :jvm nil           :alias #{"equiv" "comparable"}
+   :note "JVM folds this into IPersistentCollection.equiv and Util; Clojerl,
+          ClojureDart and ClojurePHP give it its own carrier."}
+  {:id :reduce       :kind :operation :asks "fold over it, internally"
+   :jvm "IReduce"     :alias #{"reduceinit"}}
+  {:id :kv-reduce    :kind :operation :asks "fold over its pairs"
+   :jvm "IKVReduce"   :alias #{"kvreduce" "reducekv"}}
+  {:id :editable     :kind :operation :asks "can it become transient"
+   :jvm "IEditableCollection" :alias #{"evolveablecollection" "transientable"}}
+  {:id :transient    :kind :operation :asks "mutate in place, then persist"
+   :jvm "ITransientCollection"
+   :alias #{"transientassociative" "transientmap" "transientset"
+            "transientvector" "persistentable"
+            "conjableinplace" "associativelywritableinplace"
+            "sequencelikeinplace"}}
+  {:id :chunk        :kind :operation :asks "a chunk, as a value"
+   :jvm "IChunk"      :alias #{"chunklike"}}
+  {:id :drop         :kind :operation :asks "skip n without walking"
+   :jvm "IDrop"}
+  {:id :atom         :kind :operation :asks "compare-and-set a value"
+   :jvm "IAtom"       :alias #{"reset" "swap"}}
+  {:id :ref          :kind :operation :asks "a coordinated mutable cell"
+   :jvm "IRef"        :alias #{"reflike" "watchable"}}
+  {:id :reference    :kind :operation :asks "alter its metadata in place"
+   :jvm "IReference"}
+  {:id :ex-info      :kind :operation :asks "its attached data"
+   :jvm "IExceptionInfo" :alias #{"error" "exmessage"}}
+  {:id :type         :kind :operation :asks "is it a deftype instance"
+   :jvm "IType"}
+  {:id :call         :kind :operation :asks "invoke it"
+   :jvm "IFn"         :alias #{"fnarity" "fnclosure" "callable"}}]}

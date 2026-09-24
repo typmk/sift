@@ -1,0 +1,124 @@
+#!/usr/bin/env bb
+;; The scorecard: everything sift claims, re-measured in one run.
+;;
+;;   bin/validate            all corpora in corpora/*.edn
+;;   bin/validate sift cherry  named ones
+;;
+;; For each corpus with an oracle directory (bin/oracle's output for the JVM,
+;; a shadow-cljs release log plus bin/oracle-js's externs.edn for JS — kept
+;; at :oracle, outside the repo, because notes name private files): typeflow's
+;; predictions against the compiler's warnings, precision and recall, with
+;; the corpus's :role beside the number — an :in-sample corpus is one the
+;; rules were learned from and its score is a fit; :held-out and :blind are
+;; forecasts. A corpus whose oracle is absent is reported as SKIPPED, never
+;; silently dropped. Then the evidence ledger's rung counts, derived from
+;; every rule's registry entry, so how many rules are still :unjudged is
+;; printed beside the numbers that are not.
+;;
+;; The judging itself (what bin/falsify did until 2026-08-28) lives here:
+;; oracle notes and predictions are joined on the longest path suffix, only
+;; files the compiler loaded are judged, and an :in-sample label is the
+;; honest one for any corpus a rule was learned from.
+;;
+;; The unit suite (clojure -M:test) is the other half and is not run here:
+;; it is the gate, this is the measurement.
+(require '[babashka.classpath :as cp] '[babashka.fs :as fs]
+         '[clojure.edn :as edn] '[clojure.set :as set] '[clojure.string :as str])
+(def here (fs/parent (fs/parent (fs/real-path *file*))))
+(cp/add-classpath (str here "/src"))
+(require '[net.typemark.sift :as sift] '[net.typemark.sift.typeflow :as tf] '[net.typemark.sift.resolve :as resolve])
+(defn expand [s] (str/replace s #"^~" (System/getProperty "user.home")))
+(defn tail2 [p] (str/join "/" (take-last 2 (str/split (str p) #"/"))))
+
+(defn judge
+  "One corpus, one kind: {:oracle n :predicted n :tp n :fp n :fn n :p :r :fns :fps}."
+  [root odir kind]
+  (let [kind (keyword kind)
+        js? (fs/exists? (str odir "/closure.log"))
+        text (slurp (str odir (if js? "/closure.log" "/notes.edn")))
+        code->kind {:assay.note/boxed-math :boxed-math :assay.note/reflection :reflection}
+        assay-notes (for [l (str/split-lines text) :when (str/starts-with? l "#:assay.note")
+                          :let [n (edn/read-string l) sp (:assay.note/span n)]]
+                      {:file (str (:assay/file sp)) :line (:assay/line sp) :col (:assay/col sp) :kind (code->kind (:assay.note/code n))})
+        closure-notes (for [[_ k file line col] (re-seq #"(?m)^------ WARNING #\d+ - (\S*) -+\s*\n File: (\S+?):(\d+)(?::(\d+))?" text)]
+                        {:file file :line (parse-long line) :col (some-> col parse-long)
+                         :kind ({":infer-warning" :uninferred ":undeclared-var" :undeclared} k :closure)})
+        loaded (let [f (str odir "/loaded.edn")] (when (fs/exists? f) (set (edn/read-string (slurp f)))))
+        suffix? (fn [a b] (or (str/ends-with? a b) (str/ends-with? b a)))
+        canon (fn [f] (if loaded (or (some #(when (suffix? (str f) %) %) loaded) (tail2 f)) (tail2 f)))
+        oracle (set (for [n (concat assay-notes closure-notes)
+                          :when (= kind (:kind n))
+                          :when (or (nil? loaded) (some #(suffix? (:file n) %) loaded))]
+                      [(canon (:file n)) (:line n) (:col n)]))
+        host (if js? :js :jvm)
+        files (cond->> (map #(str (fs/absolutize %)) (fs/glob root "**.{clj,cljc,cljs}"))
+                loaded (filter (fn [f] (some #(suffix? (str f) %) loaded))))
+        analysis (let [f (str odir "/analysis.json")] (when (fs/exists? f) (resolve/index (slurp f))))
+        dump (let [f (str odir "/tags.edn")] (when (fs/exists? f) (edn/read-string (slurp f))))
+        externs (let [f (str odir "/externs.edn")] (when (fs/exists? f) (edn/read-string (slurp f))))
+        preds (set (for [f files
+                         p (tf/predictions (slurp f) f host {:var-tags (:vars dump) :classes dump :externs externs :resolution analysis})
+                         :when (= kind (:kind p))]
+                     [(canon f) (:line p) (:column p)]))
+        tp (count (set/intersection oracle preds))]
+    {:oracle (count oracle) :predicted (count preds) :tp tp :fp (- (count preds) tp) :fn (- (count oracle) tp)
+     :p (if (pos? (count preds)) (/ tp (double (count preds))) 0.0)
+     :r (if (pos? (count oracle)) (/ tp (double (count oracle))) 0.0)
+     :fns (sort (set/difference oracle preds)) :fps (sort (set/difference preds oracle))}))
+
+(defn- newest
+  "The newest mtime under a root, over the files a compiler would read."
+  [root]
+  (->> (fs/glob root "**.{clj,cljc,cljs}")
+       (map #(.toMillis (fs/last-modified-time %)))
+       (reduce max 0)))
+
+(defn- staleness
+  "How far behind the corpus its oracle is, in days, or nil when the dump is
+  newer than every source file. An oracle decays silently: sift's own read
+  P 0.933 for two weeks because its dump was taken on 2026-08-27 and
+  callgraph.cljc changed on 2026-09-04, and every one of those four 'false
+  positives' was a site the instrument had never seen. SKIPPED is printed
+  for an absent oracle; nothing was printed for a stale one."
+  [root oracle]
+  (let [dump (first (filter fs/exists? [(str oracle "/notes.edn") (str oracle "/closure.log")]))
+        dumped (when dump (.toMillis (fs/last-modified-time dump)))
+        src (newest root)]
+    (when (and dumped (pos? src) (> src dumped))
+      (int (Math/ceil (/ (- src dumped) 86400000.0))))))
+
+(def ^:private residue-flag (some #{"--residue"} *command-line-args*))
+(defn residue [] residue-flag)
+(let [names (disj (set *command-line-args*) "--residue")
+      manifests (->> (fs/glob (str here "/corpora") "*.edn") (map str) sort
+                     (map #(edn/read-string (slurp %)))
+                     (filter #(or (empty? names) (names (:name %)))))]
+  (println "typeflow vs the host compiler, per corpus")
+  (printf "%-12s %-10s %-11s %s%n" "corpus" "role" "kind" "oracle predicted tp fp fn  precision recall")
+  (doseq [{:keys [name root oracle role kinds]} manifests
+          :let [root (expand root) oracle (expand oracle)]]
+    (if-not (and (or (fs/exists? (str oracle "/notes.edn")) (fs/exists? (str oracle "/closure.log"))) (fs/exists? root))
+      (printf "%-12s %-10s SKIPPED — %s%n" name (clojure.core/name role)
+              (if (fs/exists? root) (str "no oracle at " oracle " (run bin/oracle in the project)") (str "no source at " root)))
+      ;; :kinds in the manifest restricts what this oracle can judge — a
+      ;; classpath run that warns on reflection but cannot on boxing
+      (do
+       (when-let [d (staleness root oracle)]
+         (printf "%-12s %-10s STALE — the oracle is %d day(s) behind this source; re-run bin/oracle before believing the score%n"
+                 name (clojure.core/name role) d))
+       (doseq [kind (or kinds (if (fs/exists? (str oracle "/closure.log")) ["uninferred"] ["boxed-math" "reflection"]))]
+        (let [{:keys [oracle predicted tp fp fn p r fns fps]} (judge root oracle kind)]
+          ;; 0 predicted / 0 in the oracle is a correct empty, not a score of
+          ;; zero — P 0.000 there reads as failure and is nothing of the kind.
+          (printf "%-12s %-10s %-11s %4d %4d %4d %4d %4d  P %s R %s%n" name (clojure.core/name role) kind oracle predicted tp fp fn
+                  (if (pos? predicted) (format "%.3f" p) "  —  ") (if (pos? oracle) (format "%.3f" r) "  —  "))
+          (when (residue)
+            (doseq [k (take 10 fns)] (println "     missed   " k))
+            (doseq [k (take 10 fps)] (println "     wrong    " k))))))))
+  (println)
+  (println "evidence ledger — derived from every rule's registry entry (sift/evidence)")
+  (doseq [[rung rules] (sort-by key (group-by (comp :evidence val) (sift/evidence)))]
+    (printf "  %-10s %3d  %s%n" (clojure.core/name rung) (count rules)
+            (if (= rung :unjudged) (str/join " " (sort (map (comp clojure.core/name key) rules))) "")))
+  (println)
+  (println "the gate is the suite: clojure -M:test"))

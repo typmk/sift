@@ -1,0 +1,12 @@
+;; a corpus bin/validate judges typeflow on. :role is the honest label —
+;; :in-sample was learned from, :held-out was judged after the rules were
+;; written, :blind was never read before its first score was recorded.
+{:name "clojure-lsp"
+ :root "~/.cache/sift/corpora/clojure-lsp/lib/src"
+ :oracle "~/.cache/sift/oracles/clojure-lsp-blind"
+ ;; first score, never read (2026-08-31, clojure-lsp cd799b75c, lib/ only):
+ ;; boxed 212 oracle / 257 predicted, tp 210 fp 47 fn 2 — P 0.817 R 0.991;
+ ;; reflection 0 oracle / 11 predicted — P 0.000: 52 files set
+ ;; *warn-on-reflection* and the compiler warned nowhere. Residue NOT read;
+ ;; reading it moves this to :in-sample and retires the last blind corpus.
+ :role :blind}

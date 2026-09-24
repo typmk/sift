@@ -1,0 +1,245 @@
+;; sift's data rules — read by net.typemark.sift.data at load time.
+;;
+;; Vale's idea: a few rule KINDS, each configured by data. Two so far.
+;;
+;;   :rewrite   {:match pattern :emit template}  — a form that says by hand
+;;              what a core form says by name; the counterpart is the
+;;              template instantiated from the match.
+;;   :forbid    {:match pattern}                 — a form that should not
+;;              appear; no counterpart, or a fixed one.
+;;
+;; Every rule: :id (keyword), :evidence (the rung — :corpus for a rule with
+;; its flag/clear pair; :note the measurement), :kind, :category (the concern: :refactor
+;; :complexity :performance :security :correctness :documentation), :applicability (clippy's
+;; :machine-applicable :maybe-incorrect :has-placeholders :unspecified),
+;; :message, :instruction. Optional :when {?v pred} where pred is a keyword
+;; naming a guard in net.typemark.sift.data/guards, or a set of literals.
+;;
+;; Patterns are net.typemark.sift.pattern's: ?x binds, ?_ ignores, ?&rest
+;; takes the tail, `P ...` repeats, `(?? P Q) ...` repeats a group. A
+;; symbol without ? is literal.
+;;
+;; WHERE, not only what — Semgrep's combinators: :either [P …] in place of
+;; :match, :not [P …] to exclude, :inside P for an ancestor that must match
+;; with the SAME bindings.
+;;
+;; ORDER DOES NOT MATTER: the first rule that matches a form wins, and no
+;; two rules can match one form — every pattern's head is a literal symbol
+;; and no head appears in two rules. data_rules_order_test pins that;
+;; bin/rule-order measures it (20 shuffled orders, four corpora, zero forms
+;; whose finding moved, 2026-09-02). A rule whose head another rule already
+;; carries needs a :not or a guard, not a position.
+;;
+;; NOT HERE: what splint (noahtheduke/splint, in the estate's `lint:style`)
+;; already says. Measured 2026-08-27 on this corpus, six data rules were
+;; splint rules under other names and were removed — lint/if-else-nil,
+;; lint/if-not-both, style/when-not-call, style/eq-zero, lint/not-empty?,
+;; style/apply-str-interpose. A rule enters here only when splint's 108
+;; rules (36 lint, 57 style, 6 naming, 7 performance, 2 metrics) do not
+;; carry it; the differentiator is shape, complexity, the host boundary and
+;; the graph, not idiom.
+;;
+;; THE GATE IS UNCHANGED BY THE FORMAT: a rule enters with a flag file
+;; that fires and a clear file that stays silent
+;; (test/…/corpus/{flag,clear}/data_rules*.clj), and every hit on real code
+;; is read before it lands. Being data makes a rule cheap to write, not
+;; cheap to trust.
+
+[;; NOT (some ?p ?xs): some returns what p returned, not the element.
+ ;; Measured on a code-graph tool — all ten hits were (first (filter #(= id (:id %))
+ ;; xs)), and the shorter rewrite would have returned true. maybe-incorrect
+ ;; because a nil or false element is found by first and skipped by some.
+ {:id :first-filter-is-some
+  :evidence :corpus :note "ten hits on a code-graph tool read; the first counterpart was wrong and retracted"
+  :kind :rewrite
+  :match (first (filter ?p ?xs))
+  :emit (some (fn [x] (when (?p x) x)) ?xs)
+  :category :refactor
+  :applicability :maybe-incorrect
+  :message "(first (filter p xs)) walks no further than some does, and some says so"
+  :instruction "Use (some (fn [x] (when (p x) x)) xs); a nil or false element is the one case first finds and some does not."}
+
+ ;; No cond->case rule here: cond_case.cljc covers it, with the two cases a
+ ;; pattern cannot say — no :else, and (= k x) either way round — and the
+ ;; nil default the counterpart needs. A data row for the :else case lived
+ ;; here as the demonstration of `(?? P Q) ...` and fired TWICE with it on
+ ;; sift's own complexity.cljc:379; one fact, one rule. The repetition
+ ;; syntax keeps its test in pattern_test.
+
+ ;; No catch-all rule here: host.cljc's :catch-all-swallow covers it with
+ ;; the class set and the constant-body test a pattern cannot say. One
+ ;; fact, one rule.
+
+ ;; (swap! a (fn [v] (conj v @a))) and (swap! a assoc k (merge (get @a k)
+ ;; …)) — the atom read while its own swap! is being computed. In the fn,
+ ;; v IS the current value and @a is a second, possibly older, read; in the
+ ;; arguments, the read happens before the swap and another writer can land
+ ;; between — a lost update. Measured: one in a production service's secrets.clj, the
+ ;; argument form. :inside carries ?a, so a deref of a DIFFERENT atom is not
+ ;; this.
+ {:id :deref-inside-own-swap
+  :evidence :corpus :note "one in a production service's secrets.clj:285, a real lost update"
+  :kind :forbid
+  :either [(clojure.core/deref ?a) (deref ?a)]
+  :inside (swap! ?a ?&_)
+  :category :correctness
+  :applicability :unspecified
+  :message "the atom is read while its own swap! is computed — a lost update"
+  :instruction "Inside (swap! a f), f receives the current value — use it. In the arguments, move the read into f: (swap! a update k merge …). A second @a may be older, and f may run more than once."}
+
+ ;; ---- the nufuturo-ufcg Clojure smell catalogue, 2026-09-10 ---------------
+ ;; 34 smells from a grey-literature review and a 95-developer survey. splint
+ ;; 1.24.0 and clj-kondo already carry 8 of them and those are out by the gate
+ ;; above. These are the ones that are DEFECTS rather than idiom, each gated
+ ;; on a flag/clear pair and each read on 1,131 files / 282,806 lines across
+ ;; 14 codebases — the fired/searched pair is in the :note, because a zero
+ ;; means nothing without its denominator. Held back and why:
+ ;;   unmanaged-closeable       29% precision at this rung; three false-positive
+ ;;                             classes (ownership transfer, no OS handle, a
+ ;;                             closed delegate) that need the class table and
+ ;;                             escape analysis. It is an inventory, not a rule.
+ ;;   multiple-evaluation-in-macro  whether a macro parameter is an EXPRESSION
+ ;;                             is not a property of the macro; 7 of 23 vanish
+ ;;                             when the call sites are read. Needs the graph.
+ ;;   misused-threading         falsified: the oracle types 10.2% of threading
+ ;;                             steps and all ten class changes it can see are
+ ;;                             idiom. The catalogue's own example reads
+ ;;                             File -> String, the same as (-> op name keyword).
+
+ {:id :blocking-inside-go
+  :evidence :corpus :note "0 of 152 go forms over 14 codebases — a meaningful zero, the denominator says the rule was armed"
+  :kind :forbid
+  :scope :any
+  :either [(clojure.core.async/<!! ?c) (clojure.core.async/>!! ?c ?v)
+           (clojure.core.async/alts!! ?&_) (clojure.core.async/alt!! ?&_)
+           (<!! ?c) (>!! ?c ?v) (alts!! ?&_) (alt!! ?&_)]
+  :inside [(clojure.core.async/go ?&_) (clojure.core.async/go-loop ?&_)
+           (go ?&_) (go-loop ?&_)]
+  :category :correctness
+  :applicability :unspecified
+  :message "a blocking take or put inside a go block parks a thread of a finite pool"
+  :instruction "Use the parking form — <! >! alts! — inside go. Blocking belongs outside it, or inside (a/thread …), which is an unbounded pool."}
+
+ {:id :nested-reference
+  :evidence :corpus :note "50 of 878 reference constructions; logseq's frontend/state.cljs holds 49 atoms inside one atom"
+  :kind :forbid
+  :scope :any
+  :either [(clojure.core/atom ?&_) (atom ?&_) (ref ?&_) (agent ?&_) (volatile! ?&_)]
+  :inside [(clojure.core/atom ?&_) (atom ?&_) (ref ?&_)]
+  :category :refactor
+  :applicability :unspecified
+  :message "a reference type inside another — no snapshot of the whole is consistent"
+  :instruction "Hold one value in one identity. Updating the inner reference does not change the outer one, so no reader ever sees a coherent whole."}
+
+ {:id :case-else
+  :evidence :corpus :note "1 of 544 case forms, and it was a live bug — logseq electron/server.cljs:183 throws where it means to default"
+  :kind :forbid
+  :scope :body
+  :match (case ?x (?? ?k ?e) ... :else ?d)
+  :category :correctness
+  :applicability :unspecified
+  :message ":else is a TEST VALUE in case, not a default — it fires only for the input :else"
+  :instruction "case has no :else. Put the default in the trailing position with no test beside it, or use cond."}
+
+ {:id :marker-protocol
+  :evidence :corpus :note "1 of 135 defprotocols — core.async's own (defprotocol UnblockingBuffer)"
+  :kind :forbid
+  :scope :top
+  :either [(defprotocol ?n) (defprotocol ?n ?doc)]
+  :when {?doc :string?}
+  :category :refactor
+  :applicability :unspecified
+  :message "a defprotocol with no methods is a type tag wearing protocol machinery"
+  :instruction "If it names a kind rather than a contract, a metadata key or a keyword in the value says so at no cost."}
+
+ {:id :private-multimethod
+  :evidence :corpus :note "7 of 72 defmulti forms; clojure.pprint does it three times, so the smell is contested"
+  :kind :forbid
+  :scope :top
+  :match (defmulti ?n ?&_)
+  :when {?n :private-meta}
+  :category :refactor
+  :applicability :unspecified
+  :message "a private multimethod closes the one abstraction built to be open"
+  :instruction "A multimethod exists so another namespace can extend it. If nothing may, a case or a map of functions says that plainly."}
+
+ {:id :monolithic-ns-split
+  :evidence :corpus :note "28 of 1,171 top-level forms, ALL of them clojure.core bootstrapping itself; 0 on application code"
+  :kind :forbid
+  :scope :top
+  :either [(load ?&_) (in-ns ?&_)]
+  :category :refactor
+  :applicability :unspecified
+  :message "one namespace split across files by load/in-ns is invisible to every build tool"
+  :instruction "Make each file its own namespace and require it. load and in-ns bypass the dependency graph tools read."}
+
+ {:id :ns-load-side-effect
+  :evidence :corpus :note "7 of 1,229 — 5 real in a numeric library, 2 clojure.core's own bootstrap"
+  :kind :forbid
+  :scope :top
+  :either [(require ?&_) (use ?&_) (requiring-resolve ?&_)]
+  :category :correctness
+  :applicability :unspecified
+  :message "a require outside the ns form is a dependency the build graph does not have"
+  :instruction "Declare it in the ns form. A requiring-resolve INSIDE a function is the idiom for breaking a cycle and is not this."}
+
+ {:id :rt-internal
+  :evidence :read :note "55 hits, of which 50 are Clojure's and ClojureScript's own implementation; the 5 that are not are nippy and datalevin"
+  :kind :forbid
+  :scope :any
+  :head-ns "clojure.lang.RT"
+  :category :correctness
+  :applicability :unspecified
+  :message "clojure.lang.RT is Clojure's internals, not its API"
+  :instruction "Use the public var. RT has no compatibility promise and a release can move a method without notice."}
+
+ {:id :thread-sleep
+  :evidence :corpus
+  :kind :forbid
+  :either [(Thread/sleep ?&args) (java.lang.Thread/sleep ?&args)]
+  :category :performance
+  :applicability :unspecified
+  :message "Thread/sleep blocks a host thread"
+  :instruction "Schedule with a timer, a core.async timeout, or an executor; a blocked thread is a held resource."}
+ ;; ---- host interop, as data (moved from interop.cljc 2026-08-28) ----------
+ ;; Heads are FULL class names: the engine resolves (InitialContext/doLookup
+ ;; …) through the file's :import before matching. :dynamic — the bound
+ ;; argument is computed, not a literal. {:tag C} — the bound form's tag, by
+ ;; typeflow's annotated walk, is C or a subtype in the oracle's table; the
+ ;; instance form of jndi-injection needs it, and until 2026-08-28 the rule
+ ;; covered the static form only because no node rule could ask.
+ {:id :jndi-injection
+  :evidence :corpus :note "node_rules_test, both forms; the instance form through typeflow's tags"
+  :kind :forbid
+  :either [(javax.naming.InitialContext/doLookup ?n)
+           (.lookup ?ctx ?n)
+           (.doLookup ?ctx ?n)]
+  :when {?n :dynamic ?ctx {:tag "javax.naming.Context"}}
+  :category :security
+  :applicability :unspecified
+  :message "JNDI lookup with a computed name"
+  :instruction "A caller-controlled JNDI name is remote code execution on older JDKs and information disclosure on new ones; look up a literal name, or validate against an allow-list first."}
+ {:id :unsafe-deserialization
+  :evidence :corpus :note "security_test / node_rules_test"
+  :kind :forbid
+  :either [(java.io.ObjectInputStream. ?&args) (java.beans.XMLDecoder. ?&args)]
+  :category :security
+  :applicability :unspecified
+  :message "Java native deserialization"
+  :instruction "ObjectInputStream and XMLDecoder run the classes in the stream; use a data format, or an ObjectInputFilter with an allow-list."}
+ {:id :predictable-temp-file
+  :evidence :corpus :note "node_rules_test"
+  :kind :forbid
+  :match (java.io.File/createTempFile ?&args)
+  :category :security
+  :applicability :unspecified
+  :message "File/createTempFile is predictable and world-readable by default"
+  :instruction "Use java.nio.file.Files/createTempFile, which sets owner-only permissions."}
+ {:id :shell-invocation
+  :evidence :corpus :note "node_rules_test; 0 hits on seven corpora"
+  :kind :forbid
+  :match (java.lang.ProcessBuilder. ?&args)
+  :category :security
+  :applicability :unspecified
+  :message "process spawned — confirm no argument is caller-controlled"
+  :instruction "Pass the command as a literal vector and the untrusted part as an argument, never through a shell string."}]

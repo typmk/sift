@@ -1,0 +1,72 @@
+#!/usr/bin/env bb
+;; The falsifier for rules.edn's ordering claim.
+;;
+;;   rule-order [--n N] [--seed S] <path> ...
+;;
+;; try-rules takes the FIRST rule that matches a form, and rules.edn is
+;; ordered specific before general on that account. This runs the data
+;; rules over every form in the given paths in N seeded shuffles of the
+;; rule vector and reports the forms whose finding differs between orders,
+;; with the rule pairs responsible. Zero means the order is not load-bearing.
+(require '[babashka.classpath :as cp] '[babashka.fs :as fs] '[clojure.string :as str])
+(cp/add-classpath (str (fs/parent (fs/parent (fs/real-path *file*))) "/src"))
+(require '[net.typemark.sift.data :as data]
+         '[rewrite-clj.parser :as parser]
+         '[rewrite-clj.zip :as z])
+
+(defn- opt [args flag default]
+  (or (some->> args (drop-while #(not= flag %)) second parse-long) default))
+
+(defn- clj-file? [p] (contains? #{"clj" "cljs" "cljc"} (fs/extension p)))
+
+(defn- expand [path]
+  (let [p (fs/path path)]
+    (cond (fs/regular-file? p) (if (clj-file? p) [p] [])
+          (fs/directory? p) (filterv clj-file? (fs/glob p "**.{clj,cljs,cljc}"))
+          :else [])))
+
+(defn- zloc-of [text]
+  (try (z/edn* (parser/parse-string-all text) {:track-position? true})
+       (catch Exception _ nil)))
+
+(defn- keyed
+  "{[file line column] rule} for one order of the rules."
+  [rules files]
+  (with-redefs [data/rules rules]
+    (into {}
+          (for [f files
+                :let [text (slurp (str f)) zloc (zloc-of text)]
+                :when zloc
+                finding (data/findings (str f) zloc)]
+            [[(str f) (:line finding) (:column finding)] (:rule finding)]))))
+
+(defn- seeded-shuffle [seed coll]
+  (let [rnd (java.util.Random. seed)
+        a (java.util.ArrayList. coll)]
+    (java.util.Collections/shuffle a rnd)
+    (vec a)))
+
+(let [args *command-line-args*
+      n (opt args "--n" 20)
+      seed (opt args "--seed" 42)
+      paths (remove #(or (str/starts-with? % "--") (re-matches #"\d+" %)) args)
+      files (mapcat expand paths)
+      _ (when (empty? files) (binding [*out* *err*] (println "rule-order: no files")) (System/exit 2))
+      base (keyed data/rules files)
+      orders (map #(seeded-shuffle (+ seed %) data/rules) (range n))
+      results (map #(keyed % files) orders)
+      keys-all (into (set (keys base)) (mapcat keys results))
+      differing (for [k keys-all
+                      :let [seen (into #{(get base k)} (map #(get % k) results))]
+                      :when (> (count seen) 1)]
+                  [k seen])
+      pairs (frequencies (map (fn [[_ seen]] (vec (sort (map str seen)))) differing))]
+  (printf "files %d · forms with a finding under the shipped order %d · rules %d · orders %d\n"
+          (count files) (count base) (count data/rules) n)
+  (printf "forms whose finding depends on rule order: %d\n" (count differing))
+  (doseq [[pair c] (sort-by (comp - val) pairs)]
+    (printf "  %s  %d\n" (str/join " vs " pair) c))
+  (doseq [[[f l c] seen] (take 20 (sort-by first differing))]
+    (printf "  %s:%s:%s  %s\n" f l c (str/join " | " (map str seen))))
+  (flush)
+  (System/exit (if (seq differing) 1 0)))

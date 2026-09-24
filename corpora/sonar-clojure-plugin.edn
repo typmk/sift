@@ -1,0 +1,15 @@
+;; sonar-clojure compiled on the PLUGIN's classpath — the 14 files the plain
+;; classpath cannot load. The oracle is the suite's own stderr with
+;; *warn-on-reflection* on (201 distinct sites, 2026-08-28); that run
+;; cannot warn on boxing, so only reflection is judged here.
+{:name "sonar-clojure-plugin"
+ :root "~/.cache/sift/corpora/sonar-clojure/src"
+ :oracle "~/.cache/sift/oracles/sonar-clojure-plugin"
+ :kinds ["reflection"]
+ ;; first score (2026-08-28), the files never judged before: 200/206
+ ;; predicted, 1 missed — P 0.971 R 0.995; the 6 were drift (the analysis
+ ;; predated two inserted lines) and are 200/200 after regeneration. The
+ ;; one miss stays named: (RuleType/valueOf ^String (or type "CODE_SMELL"))
+ ;; — an enum's valueOf on a hinted `or`, which the compiler reflected on
+ ;; with "argument types: java.lang.String" and the model resolves.
+ :role :held-out}

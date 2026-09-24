@@ -1,10 +1,4 @@
 (ns net.typemark.sift.analysis
-  "Turns clj-kondo's analysis output into a Sonar symbol table.
-
-  This is the one place Clojure has an advantage: clj-kondo already emits
-  var-definitions, var-usages, locals and local-usages with exact positions,
-  so the symbol table is a reshaping of data that exists rather than a
-  second parse of the source."
   (:require [net.typemark.sift.json :as json]))
 
 (defn- span [m rk ck erk eck]
@@ -17,12 +11,6 @@
       (span m "row" "col" "end-row" "end-col")))
 
 (defn symbols
-  "analysis JSON text -> {filename [{:declaration span :references [span]}]}.
-
-  Locals are keyed by clj-kondo's own id. Vars are keyed by namespace and
-  name, and references are only linked within the defining file: a var used
-  across namespaces resolves in Sonar's own cross-file navigation, and
-  claiming it here would place a reference on a file that never mentions it."
   [analysis-text]
   (let [a       (get (json/read-str analysis-text) "analysis")
         defs    (get a "var-definitions" [])

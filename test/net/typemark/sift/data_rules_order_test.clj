@@ -1,17 +1,8 @@
 (ns net.typemark.sift.data-rules-order-test
-  "rules.edn is applied first-match-wins, which is a term-rewriting system
-  with no confluence guarantee unless the rules cannot overlap. They cannot:
-  every :match / :either pattern starts with a literal symbol, and no head
-  is claimed by two rules. That is the property that makes the file's order
-  a non-decision. Measured before this test pinned it: 20 shuffled orders
-  over four corpora, zero forms whose finding moved."
   (:require [clojure.test :refer [deftest is testing]]
             [net.typemark.sift.data :as data]))
 
 (defn- heads
-  "The literal head of every pattern a rule carries. A :head-ns rule has no
-  pattern — it names a class and its members are wild — so it contributes
-  the class name itself, which is what it claims and what must be unique."
   [{:keys [match either head-ns]}]
   (if head-ns
     [(symbol head-ns)]

@@ -1,22 +1,4 @@
 (ns net.typemark.sift.loop-fold
-  "Fourth raise: a two-binding loop that walks a seq and threads an
-  accumulator is a `reduce`.
-
-     (loop [xs coll acc init]
-       (if (seq xs)
-         (recur (rest xs) (f acc (first xs)))
-         acc))
-
-  The seq binding is whichever one the test names — `(seq xs)`, `(empty? xs)`,
-  `(if-not (seq xs) …)` — the other is the accumulator, and binding order
-  does not matter. The recur must step the seq by `rest`/`next` and the
-  exhausted branch must return the accumulator itself; a loop that returns
-  `(count acc)` or steps two at a time or grows the seq is something else.
-
-  Mechanical when the rewritten step mentions the accumulator and no longer
-  mentions the seq — `(first xs)` became the element — otherwise a `maybe`
-  with the form still attached. `loop-as-map` runs first and owns the
-  `[]`/`conj` special case; this rule skips a loop that one already named."
   (:require [net.typemark.sift.zip :refer [list-op op-name call? inside-defn? collect two-binds single-body pos-of]]))
 
 (def rule :loop-as-reduce)
@@ -31,8 +13,6 @@
 (defn- first-of? [form xs] (and (call? form "first") (= xs (second form))))
 
 (defn- split-if
-  "`(if T A B)` -> {:xs sym :walk A :done B} when T names the seq via
-  seq/empty?/not/if-not, with `done` the exhausted branch. nil otherwise."
   [form syms]
   (when (and (seq? form) (= 4 (count form)) (contains? #{'if 'if-not} (first form)))
     (let [[op t a b] form
@@ -47,8 +27,6 @@
           {:xs xs :walk b :done a})))))
 
 (defn- step
-  "`(recur R1 R2)` or `(let [el (first xs)] (recur R1 R2))` -> {:expr :el}
-  where the seq position is `(rest xs)` and the other is the new acc."
   [form xs acc xs-first?]
   (let [[el inner] (if (and (call? form "let") (vector? (second form)) (= 2 (count (second form)))
                             (= 3 (count form)) (symbol? (first (second form)))
@@ -104,8 +82,6 @@
                :counterpart (list 'reduce (list 'fn [acc x] body') init coll)})))))))
 
 (defn findings
-  "`taken` is the set of [line col] positions another loop rule already
-  reported, so one loop gets one finding."
   ([file zloc] (findings file zloc #{}))
   ([file zloc taken]
    (vec (keep (fn [lz]

@@ -1,41 +1,4 @@
 (ns net.typemark.sift.cli
-  "sift's CLI — the rules over source text, on files and directories, with no
-  graph and no index; for a lint task or a human at a prompt.
-  
-    sift lint <path>…         every finding sift has for each file
-                              (sift/analyze)
-    sift complexity <path>…   units over the cognitive threshold (default 15)
-    sift oracle [--out DIR] <src-root>…
-                              run in YOUR project: loads its namespaces in a JVM
-                              (clojure -M, the project's classpath) and writes
-                              what the compiler said to DIR (default oracle/),
-                              which --oracle then reads
-    sift oracle --js [--out DIR] [closure-compiler.jar]
-                              the JS host's oracle: the property names Closure's
-                              default externs declare, as DIR/externs.edn
-    --category C              lint only: refactor | complexity | performance |
-                              security | correctness | documentation
-    --edn                     print findings as EDN
-    --threshold N             complexity only
-    --oracle DIR              `sift oracle`'s output: typeflow is judged against
-                              the compiler, and DIR/analysis.json is used as
-                              --analysis when present
-    --analysis FILE           clj-kondo analysis JSON (see the README for the
-                              config): aliased core vars resolve, shadowed ones
-                              do not, and lint gains the docstring rules
-    --vocabulary FILE         lint only: the project's own terms, as EDN —
-                              {:banned {:dimension \":facet\"} :shared-ns #{:taxon}};
-                              :banned needs --analysis
-    --baseline FILE           report only findings NOT in FILE (detekt's ratchet)
-    --write-baseline FILE     write the current findings as the baseline and exit 0
-  
-  Exit 1 when anything is reported, 0 when clean, 2 on usage. Reports; the
-  gate is the caller's — sift never writes.
-
-  Babashka only: it uses babashka.fs and babashka.process, which the JVM
-  does not have. The library never requires this namespace, so JVM and
-  ClojureScript consumers never load it; `sift oracle` over sift's own src/
-  reports it as not loaded, which is expected."
   (:require [babashka.fs :as fs]
             [babashka.process :as process]
             [clojure.edn :as edn]
@@ -47,8 +10,6 @@
             [net.typemark.sift.complexity :as cx]))
 
 (defn- root
-  "The sift checkout this namespace was loaded from — a clone or a gitlib —
-  so `sift oracle` can find oracle/ beside src/."
   []
   (-> (io/resource "net/typemark/sift/cli.clj") io/file fs/parent fs/parent fs/parent fs/parent fs/parent str))
 
@@ -72,12 +33,6 @@
   (System/exit 2))
 
 (defn- externs!
-  "The property names in Closure's default externs, as a set in
-  `out`/externs.edn. Measured on a ClojureScript app before its 42
-  :infer-warnings were fixed: P 0.84 R 1.00. The 8 false positives were npm
-  property names shadow-cljs knew from sources this does not read; adding
-  every property name in those sources removed the 8 and lost 14 true
-  positives, so that is not the rule."
   [out jar]
   (let [jar (or jar
                 (->> (fs/glob (str (System/getProperty "user.home") "/.m2/repository/com/google/javascript/closure-compiler") "**/closure-compiler-v*.jar")
@@ -98,7 +53,6 @@
         (binding [*out* *err*] (println (count names) "property names from" (fs/file-name jar) "->" (str out "/externs.edn")))))))
 
 (defn- oracle!
-  "`sift oracle [--js] [--out DIR] …`"
   [args]
   (let [args (vec args)]
     (if (some #{"--js"} args)
@@ -106,17 +60,12 @@
             jar (first (remove (into #{"--js" "--out"} [out]) args))]
         (externs! out jar)
         (System/exit 0))
-      ;; the JVM half runs on the project's own classpath, which is the point:
-      ;; the compiler has to load THIS project to say where it reflects
-      ;; oracle/ is a library with no dependencies, so -Sdeps adds one
-      ;; namespace to the project's classpath and nothing else
       (System/exit (:exit @(process/process (into ["clojure" "-Sdeps" (pr-str {:deps {'net.typemark/sift-oracle {:local/root (str (root) "/oracle")}}})
                                                    "-M" "-m" "net.typemark.sift.oracle"]
                                                   args)
                                             {:inherit true}))))))
 
 (defn- run-cli!
-  "`sift lint|complexity …`"
   [args]
   (let [args      args
         cmd       (first args)
@@ -129,10 +78,7 @@
         analysis  (or (some->> rest-args (drop-while #(not= "--analysis" %)) second)
                       (when odir (let [f (str odir "/analysis.json")] (when (fs/exists? f) f))))
         resolution (when analysis (resolve/index (slurp analysis)))
-        ;; docstring rules and the banned terms read the same analysis, once
         prose     (when analysis (sift/prose-findings (slurp analysis) vocabulary))
-        ;; `sift oracle`'s directory: the JVM's var tags and class table, so
-        ;; typeflow's findings are judged and not :unjudged
         dump      (when odir (let [f (str odir "/tags.edn")] (when (fs/exists? f) (edn/read-string (slurp f)))))
         loaded    (when odir (let [f (str odir "/loaded.edn")] (when (fs/exists? f) (set (edn/read-string (slurp f))))))
         base-file (some->> rest-args (drop-while #(not= "--baseline" %)) second)
@@ -148,8 +94,6 @@
                        (remove #(and write-base (= % write-base)))
                        (remove #(and category (= % (name category))))
                        vec)
-        ;; once over the corpus, not per file: a file with no tenancy word still
-        ;; belongs to a tenanted project, and a project with none is not one
         tenanted  (delay (sift/tenanted? (map (comp slurp str (fn [p] (fs/absolutize p))) (mapcat expand paths))))
         run       (case cmd
                     "lint"       (fn [file]
@@ -165,8 +109,7 @@
                                                  (cx/findings (slurp file) file (or threshold cx/default-threshold))))
                     (usage))]
     (when (empty? paths) (usage))
-    (let [;; Relative to the cwd, so a baseline is the same file on every machine.
-          rel (fn [f] (str (fs/relativize (fs/cwd) f)))
+    (let [rel (fn [f] (str (fs/relativize (fs/cwd) f)))
           fs (vec (mapcat (fn [p] (map #(assoc % :file (rel (:file %)))
                                        (run (str (fs/absolutize p)))))
                           (mapcat expand paths)))

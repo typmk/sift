@@ -30,10 +30,7 @@
       (is (= "java.io.ObjectInputStream" (get i "ObjectInputStream"))))))
 
 (deftest catches-the-jdk-misuse-clojure-inherits
-  ;; weak-hash, cipher, TLS and insecure-random moved to clj-kondo hooks,
-  ;; which resolve the var instead of matching its name. See hooks_test.
-  
-  (is (contains? (rules-for (str ns-form "(DocumentBuilderFactory/newInstance)"))
+    (is (contains? (rules-for (str ns-form "(DocumentBuilderFactory/newInstance)"))
                  "xml-external-entity"))
   )
 

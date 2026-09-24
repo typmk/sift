@@ -1,9 +1,4 @@
 (ns net.typemark.sift.node-rules-test
-  "A flag/clear pair per node rule — the corpus gate the shape and typeflow
-  families already have, for the families that predate them. A positive
-  alone proves a rule can fire, which a rule matching everything also does —
-  so every rule gets both, and the :corpus rung for these rules means THIS
-  file."
   (:require [clojure.test :refer [deftest is testing]]
             [net.typemark.sift :as sift]
             [net.typemark.sift.access :as access]
@@ -16,13 +11,10 @@
 (defn- rules [f src] (set (map :rule (f (:nodes (parse/parse src))))))
 
 (defn- fires
-  "Asserts `rule` is raised for `bad` and not for `good` -- the pair, always."
   [f rule bad good]
   (is (contains? (rules f bad) rule) (str rule " missed: " (pr-str bad)))
   (is (not (contains? (rules f good) rule))
       (str rule " false positive on: " (pr-str good))))
-
-;; ---------------------------------------------------------------- access
 
 (deftest ambiguous-owner-check
   (testing "nil owner means both untenanted and unresolved, and a two-valued test sends both down one branch"
@@ -52,8 +44,6 @@
   (testing "vacuous over a corpus that never names a tenant — :tenanted? false, from sift/tenanted?"
     (is (empty? (set (map :rule (access/findings (:nodes (parse/parse "(d/q query db)")) :tenanted? false)))))))
 
-;; ----------------------------------------------------------------- regex
-
 (deftest redos-vulnerable-regex
   (testing "brace-nested quantifiers, the shape that actually backtracks"
     (fires regex/findings "redos-vulnerable-regex"
@@ -65,8 +55,6 @@
     (fires regex/findings "partial-match-validation"
            "(defn ok? [s] (when (re-find #\"good\\\\.example\" s) :yes))"
            "(defn ok? [s] (when (re-find #\"^good$\" s) :yes))")))
-
-;; ------------------------------------------------------------------- web
 
 (deftest xss-unescaped-output
   (fires web/findings "xss-unescaped-output"
@@ -93,8 +81,6 @@
          "(def c {:cookies {\"sid\" {:value v :max-age 3600}}})"
          "(def c {:cookies {\"sid\" {:value v :max-age 3600 :http-only true :secure true}}})"))
 
-;; ----------------------------------------------------------------- tests
-
 (deftest empty-test
   (fires tests/findings "empty-test"
          "(deftest nothing (println :hi))"
@@ -113,11 +99,7 @@
          "(deftest t (is (= 1)))"
          "(deftest t (is (= 1 1)))"))
 
-;; --------------------------------------------------------------- interop
-
 (deftest jndi-injection-both-forms
-  ;; rules.edn now; the instance form needs the receiver's type, which the
-  ;; data engine reads from typeflow's annotated walk and the oracle's table
   (let [table {:classes {"javax.naming.InitialContext" {:supers ["Context" "Object"] :ctors [{:params []}] :methods {"lookup" [{:params ["String"] :returns "Object"} {:params ["Name"] :returns "Object"}] "doLookup" [{:params ["String"] :returns "Object" :static? true}]}}
                          "javax.naming.Context" {:supers ["Object"] :methods {"lookup" [{:params ["String"] :returns "Object"} {:params ["Name"] :returns "Object"}]}}}
                :by-simple {"InitialContext" ["javax.naming.InitialContext"] "Context" ["javax.naming.Context"]}}
@@ -134,13 +116,6 @@
     (is (contains? (ids "(defn t [] (java.io.File/createTempFile \"a\" \"b\"))") :predictable-temp-file))
     (is (contains? (ids "(defn p [c] (ProcessBuilder. c))") :shell-invocation) "java.lang needs no import")
     (is (not (contains? (ids "(defn p [c] (str c))") :shell-invocation)))))
-
-;; xml-external-entity's pair — parser built, hardening set or not — is in
-;; interop_test; banned-term's is in dictionary_test; the credential,
-;; permissions, shell, side-effect-in-swap and discarded-future pairs are in
-;; security_test. One gate, several files.
-
-;; ------------------------------------------------------------ invariants
 
 (deftest none-of-them-throw-on-unparseable-or-empty-input
   (doseq [f [access/findings web/findings regex/findings tests/findings interop/all-findings]

@@ -1,8 +1,4 @@
 (ns net.typemark.sift.map-loop
-  "Second raise: a two-binding loop that is (into [] (map f) xs).
-
-   Bindings: a seq and an out starting at []. Recur is (rest/next xs) plus
-   (conj out expr). C3 / BFS / retry do not match that."
   (:require [net.typemark.sift.zip :refer [list-op op-name call? inside-defn? collect two-binds single-body pos-of]]))
 
 (def rule :loop-as-map)

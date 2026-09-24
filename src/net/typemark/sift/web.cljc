@@ -1,20 +1,8 @@
 (ns net.typemark.sift.web
-  "Rules for the Clojure web stack -- hiccup, ring, reitit.
-
-  This is the bucket Java fills with 103 Spring and JavaEE rules. The
-  framework differs; the vulnerability classes do not. XSS (CWE-79), CSRF
-  (CWE-352) and credential exposure (CWE-200, CWE-522) were the largest
-  remaining gaps against Java's coverage, and all three live in framework
-  usage rather than in the language.
-
-  No generic analyzer ships these for Clojure, because they require knowing
-  what hiccup's escaping guarantees are and where ring's middleware sits."
   (:require [clojure.string :as str]
             [net.typemark.sift.tree :as tree]))
 
 (def ^:private raw-html
-  "Ways to put a string into a page without hiccup escaping it. Each exists
-  precisely to bypass the escaping, which is why each needs a reason."
   #{"raw" "h/raw" "hiccup.util/raw-string" "raw-string" "hiccup.core/raw"
     "hiccup2.core/raw" "util/raw-string"})
 
@@ -28,8 +16,6 @@
   #"(?i)(^|[-_*/.])(passwords?|passwds?|secrets?|api[-_]?keys?|tokens?|credentials?|private[-_]?keys?|access[-_]?keys?|client[-_]?secrets?|session[-_]?ids?|jwts?)([-_*?!]|$)")
 
 (defn- direct-text
-  "The text of a form's DIRECT children only. Using the whole subtree made an
-  outer map inherit its inner map's keys, so a cookie map reported twice."
   [nodes n]
   (let [d (inc (:depth n))]
     (str/join " " (map #(tree/text nodes %) (filter #(= d (:depth %)) (tree/children-of nodes n))))))
@@ -53,12 +39,6 @@
                                     (re-find #"(?i)anti-forgery|csrf" (:text n))))
                        nodes)]
      (when (and methods (not guarded))
-       ;; a route METHOD is a map key in route DATA — ["/pay" {:post h}]:
-       ;; the map's parent is a vector whose first element is the path.
-       ;; `:delete` as an argument to (crud-decision … :delete id) is an
-       ;; operation and {:delete (partial delete-op …)} a dispatch table;
-       ;; both fired on a production service, neither is a route. reitit takes a bare
-       ;; handler as the value, so the value's shape cannot decide it.
        (for [n (take 1 (filter #(and (= :keyword (:type %))
                                      (contains? state-changing (:text %))
                                      (let [p (tree/parent nodes %)

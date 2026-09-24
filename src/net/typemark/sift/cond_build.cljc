@@ -1,25 +1,4 @@
 (ns net.typemark.sift.cond-build
-  "A value built by rebinding one name, conditionally, over and over:
-
-      (let [m {}
-            m (if (:a in) (assoc m :a 1) m)
-            m (if (:b in) (assoc m :b 2) m)
-            m (if (:c in) (assoc m :c 3) m)]
-        m)
-
-  which is `cond->`. Same family as place-as-fold and loop-as-reduce — an
-  imperative accumulation no branch count sees, because every branch is
-  trivial and the complexity is in the repetition. From the nufuturo-ufcg
-  Clojure catalogue, where it is Conditional Build-Up.
-
-  Three rebindings at least. Two is a shadow, and saying so is noise: the
-  threshold is where the shape stops reading as one decision. Measured over
-  1,131 files, 8 of 12,248 `let` forms, and clojure.core's own `defn`
-  rebuilds `fdecl` four times.
-
-  The counterpart is mechanical only when every step is
-  `(if <test> (<f> <name> <args…>) <name>)` — that is exactly a cond-> pair.
-  A step shaped any other way is reported without one."
   (:require [net.typemark.sift.zip :refer [op-name list-op inside-defn?
                                            collect binder-vec vec-pairs sexpr pos-of]]))
 
@@ -31,7 +10,6 @@
 (def ^:private conditional-heads '#{if if-not when when-not})
 
 (defn- self-rebind
-  "[name step] when this pair conditionally rebinds NAME using NAME, else nil."
   [[lhs rhs]]
   (when (and (symbol? lhs) (seq? rhs)
              (contains? conditional-heads (first rhs))
@@ -39,8 +17,6 @@
     [lhs rhs]))
 
 (defn- cond-pair
-  "`(if test (f name args…) name)` -> [test (f args…)], the cond-> pair, or
-  nil when the step is shaped otherwise."
   [nm [h test then else]]
   (when (and (= 'if h) (= nm else) (seq? then) (= nm (second then)))
     [test (cons (first then) (drop 2 then))]))

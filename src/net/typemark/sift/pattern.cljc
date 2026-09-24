@@ -1,27 +1,7 @@
 (ns net.typemark.sift.pattern
-  "Structural matching over forms with metavariables — a structural
-  editor's pattern vocabulary, portable, plus repetition.
-
-    ?x        one form, bound; a second ?x must be the SAME form
-    ?_        one form, not bound
-    ?&rest    zero or more remaining forms, bound as a seq (tail only);
-              ?&_ is the same tail, unbound
-    P ...     zero or more forms each matching P; every ?v inside P binds
-              to a vector, one entry per repetition (syntax-rules' ellipsis)
-    (?? P Q) ...  a GROUP: each repetition consumes one form per member,
-              so `(cond (?? (= ?x ?k) ?e) ... :else ?d)` walks the pairs
-
-  Literals — symbols without `?`, keywords, numbers, strings — match by
-  equality. Lists match lists, vectors vectors; a map pattern matches a
-  map by key. `substitute` is the inverse: a template with the same
-  variables, `...` expanding a repeated group.
-
-  Pure functions over sexprs. Positions and the tree belong to the caller;
-  a rule that needs the zipper is a coded rule, not a data one."
   (:require [clojure.string :as str]))
 
 (defn var-sym?
-  "`?x` — but not `?_`, not `?&rest`, not `...`."
   [x]
   (and (symbol? x) (nil? (namespace x))
        (str/starts-with? (name x) "?")
@@ -37,7 +17,6 @@
 (defn- group-members [x] (rest x))
 
 (defn vars-in
-  "Every metavariable in a pattern, in order, once."
   [pat]
   (cond
     (var-sym? pat) [pat]
@@ -49,7 +28,6 @@
 (declare match*)
 
 (defn- match-seq
-  "Element-wise, honouring `P ...` groups and a trailing `?&rest`."
   [pats forms binds]
   (cond
     (empty? pats)
@@ -62,8 +40,6 @@
         (assoc binds (first pats) (vec forms))))
 
     (and (second pats) (ellipsis? (second pats)))
-    ;; greedy: take as many repetitions as match, then continue with the
-    ;; rest of the pattern. Vars inside the group bind to vectors.
     (let [p (first pats)
           after (drop 2 pats)
           members (if (group? p) (vec (group-members p)) [p])
@@ -76,7 +52,6 @@
         (let [b (match-group fs)]
           (if b
             (recur (drop width fs) (conj reps b))
-            ;; try continuing here; on failure give back one repetition
             (loop [k (count reps)]
               (when (>= k 0)
                 (let [taken (take k reps)
@@ -123,9 +98,6 @@
     :else (when (= pat form) binds)))
 
 (defn match
-  "Bindings {?x form …} when `form` matches `pat`, else nil. An empty map
-  is a match with no variables; nil is no match. With `binds`, the match
-  must agree with them — a second pattern over the same variables."
   ([pat form] (match* pat form {}))
   ([pat form binds] (match* pat form (or binds {}))))
 
@@ -153,8 +125,6 @@
       :else (recur (rest ts) (conj out (substitute (first ts) binds))))))
 
 (defn substitute
-  "The template with every metavariable replaced from `binds`. A `P ...`
-  group expands once per element of the vectors its variables hold."
   [tmpl binds]
   (cond
     (var-sym? tmpl) (get binds tmpl tmpl)

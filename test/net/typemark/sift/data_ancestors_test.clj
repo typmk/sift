@@ -1,17 +1,4 @@
 (ns net.typemark.sift.data-ancestors-test
-  "The ancestor walk that `:inside` and `:not-inside` are built on. Two
-  defects lived in it until 2026-09-10:
-
-    #(…) is ONE :fn node with no list node for its body, so the walk skipped
-    exactly one level inside every anonymous function — see the corpus pair
-    swap_in_anon_fn, which the shipped :deref-inside-own-swap now catches.
-
-    a ^{…} :meta node's sexpr IS its child's, so an annotated form was its
-    own ancestor. NOTHING SHIPPED CAN SEE THAT: no rule in rules.edn is
-    self-referential, and `findings` only walks inside a defining form, so
-    the (defonce x ^{:doc …} (atom {})) that showed it is never visited. It
-    is gated here with such a rule defined locally, because the first
-    self-referential rule to land would otherwise inherit the defect."
   (:require [clojure.test :refer [deftest is testing]]
             [net.typemark.sift.data :as data]
             [rewrite-clj.parser :as parser]

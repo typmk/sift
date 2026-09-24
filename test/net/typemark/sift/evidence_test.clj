@@ -1,6 +1,4 @@
 (ns net.typemark.sift.evidence-test
-  "A rule without a rung is a claim, and the suite says so — on the
-  registry entry itself, since 2026-08-28; evidence.edn is derived."
   (:require [clojure.test :refer [deftest is testing]]
             [net.typemark.sift :as sift]
             [net.typemark.sift.shape :as shape]

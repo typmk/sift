@@ -1,8 +1,4 @@
 (ns net.typemark.sift.complexity-test
-  "Every assertion here was first measured against cccc-core 1.6.0 with the
-  Clojure adapter patched for positional def-macros, and the two agree on
-  5,519 of 5,531 units over a code-graph tool's source; the 12 that differ are
-  lambdas inside `(comment …)`, which this suite asserts as a deviation."
   (:require [clojure.test :refer [deftest is testing]]
             [clojure.test.check.clojure-test :refer [defspec]]
             [clojure.test.check.generators :as gen]
@@ -14,8 +10,6 @@
 (defn- cog [src name] (:cognitive (unit src name)))
 (defn- cyc [src name] (:cyclomatic (unit src name)))
 
-;; ---- the whitepaper's rules ----------------------------------------------
-
 (deftest nesting-is-charged-and-cyclomatic-is-not
   (let [flat   "(defn f [x] (if x 1 2) (if x 3 4) (if x 5 6))"
         nested "(defn f [x] (if x (if x (if x 1 2) 3) 4))"]
@@ -23,7 +17,6 @@
     (is (= 6 (cog nested "f")) "three nested ifs: 1 + 2 + 3")
     (is (= (cyc flat "f") (cyc nested "f")) "McCabe cannot tell them apart")
     (is (= 3 (:max-nesting (unit nested "f"))))))
-
 
 (deftest if-is-a-ternary-not-a-statement
   (testing "an `if` with an else arm costs 1 + nesting, and nothing for the else"
@@ -67,8 +60,6 @@
   (is (= 2 (cog "(defn f [x] (if x (f (dec x)) 0))" "f")) "a call by name")
   (is (= 2 (cog "(defn f [x] (if x (recur (dec x)) 0))" "f"))
       "recur outside a loop is the same recursion — a stated departure from cccc"))
-
-;; ---- units ---------------------------------------------------------------
 
 (deftest nested-functions-are-children-and-reset-nesting
   (let [src "(defn host [x] (if x (fn [y] (if y (if y 1 2) 3)) 0))"
@@ -119,8 +110,6 @@
 (deftest module-level-lambdas-are-units
   (is (= ["<fn>"] (map :name (units "(when (exists? js/process) (.on js/process \"exit\" #(when x 1)))")))))
 
-;; ---- the reader ----------------------------------------------------------
-
 (deftest docstrings-and-comments-do-not-shift-positions
   (testing "a multi-line docstring is a :multi-line node, not a :token"
     (is (= 1 (cog "(defn f\n  \"line one\n   line two\"\n  [x] (if x 1 2))" "f"))))
@@ -143,8 +132,6 @@
     (is (= 3 (:cognitive (first (:functions (cx/report src "a.cljs"))))))
     (is (= 1 (:cognitive (first (:functions (cx/report src "a.clj"))))))))
 
-;; ---- findings ------------------------------------------------------------
-
 (deftest findings-report-units-over-the-threshold
   (let [src "(defn big [x] (if x (if x (if x (if x (if x (if x 1 2) 3) 4) 5) 6) 7))
              (defn small [x] (if x 1 2))"]
@@ -155,8 +142,6 @@
 
 (deftest unparseable-source-is-an-error-not-a-zero
   (is (false? (:ok? (cx/report "(defn f [x")))))
-
-;; ---- properties ----------------------------------------------------------
 
 (def ^:private gen-expr
   (gen/recursive-gen

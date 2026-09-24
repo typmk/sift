@@ -1,8 +1,2 @@
-;; The JVM half of `sift oracle`, as its own library with no dependencies, so
-;; adding it to a project's classpath adds one namespace and nothing else:
-;; the compiler has to see the project as it would without sift.
-;;
-;;   :sift/oracle {:extra-deps {io.github.typmk/sift {:git/tag "…" :git/sha "…" :deps/root "oracle"}}
-;;                 :main-opts  ["-m" "net.typemark.sift.oracle"]}
 {:paths ["src"]
  :deps  {}}

@@ -4,7 +4,6 @@
             [net.typemark.sift.dictionary :as dictionary]))
 
 (defn- analysis
-  "clj-kondo's keywords analysis, in the shape the real report has."
   [& kws]
   (str "{\"analysis\":{\"keywords\":["
        (str/join
@@ -19,7 +18,6 @@
        "]}}"))
 
 (def ^:private vocab
-  "A project's table, as a caller passes it."
   {:dimension ":facet" :custody ":controller" :party/platform-role "an off-graph staff fact"})
 
 (defn- rules-for [& kws]

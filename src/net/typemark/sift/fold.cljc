@@ -1,13 +1,4 @@
 (ns net.typemark.sift.fold
-  "The one rule: a let-bound atom that is only mutated and dereferenced
-   is a place used as a fold.
-
-   rewrite-clj over source. Does not evaluate. Only clojure.core /
-   cljs.core / unqualified atom and mutators count — m/atom is not a fold.
-
-   A counterpart is emitted only when the doseq body is a single
-   swap!/reset! on that atom. Anything else is a finding without a form
-   — :machine-applicable is not a doseq-count."
   (:require [net.typemark.sift.zip :refer [children peel list-op op-name token-name pos-of same-form? binder-vec vec-pairs collect inside-defn?]]
             [clojure.walk :as walk]
             [rewrite-clj.zip :as z]))
@@ -18,7 +9,6 @@
   #{"swap!" "reset!" "swap-vals!" "reset-vals!" "compare-and-set!"})
 
 (defn- core-named?
-  "atom / clojure.core/atom / cljs.core/atom. Not m/atom."
   [sym n]
   (and (symbol? sym)
        (= n (name sym))
@@ -26,27 +16,19 @@
          (or (nil? ns) (= "clojure.core" ns) (= "cljs.core" ns)))))
 
 (def ^:dynamic *resolve*
-  "{:vars {[row col] \"ns/name\"} :locals #{[row col]}} from `resolve/for-file`,
-  or nil. With it, a call form's head is what kondo says it is; without it,
-  the textual rule below decides, as it always did."
   nil)
 
 (defn- resolved-head
-  "`clojure.core/atom` for a call form kondo resolved, nil otherwise."
   [list-zloc]
   (when *resolve*
     (get (:vars *resolve*) (pos-of list-zloc))))
 
 (defn- local-call?
-  "kondo says the head of this call form is a LOCAL — a parameter named
-  `swap!` is not the mutator. A local usage in head position is keyed by
-  the call form's position, the same as a var usage."
   [list-zloc]
   (when *resolve*
     (contains? (:locals *resolve*) (pos-of list-zloc))))
 
 (defn- core-call?
-  "Is this list a call to clojure.core/<n>? Resolution first, text second."
   [list-zloc n]
   (let [z (peel list-zloc)]
     (if-let [q (resolved-head z)]
@@ -73,7 +55,6 @@
                 (children v))))))
 
 (defn- ours?
-  "True when walking up from token hits `let-zloc` before another binder of nm."
   [token-zloc let-zloc nm]
   (loop [z (z/up token-zloc)]
     (cond
@@ -83,7 +64,6 @@
       :else (recur (z/up z)))))
 
 (defn- fn-head
-  "#() is a :fn node whose children are the body tokens, not a wrapping list."
   [zloc]
   (when (and zloc (= :fn (z/tag zloc)))
     (when-let [h (first (children zloc))]
@@ -116,7 +96,6 @@
       :else :escape)))
 
 (defn- let-init?
-  "True when this node is the rhs of a let binding — (add! (fn [x] (swap! ...)))."
   [zloc]
   (let [parent (z/up zloc)
         let-z (when parent (z/up parent))]
@@ -128,7 +107,6 @@
               odd?))))
 
 (defn- named-fn?
-  "(fn name [args] …), not (fn [args] …)."
   [zloc]
   (let [xs (children (peel zloc))]
     (and (= "fn" (op-name (list-op zloc)))
@@ -137,7 +115,6 @@
          (symbol? (try (z/sexpr (second xs)) (catch #?(:clj Exception :cljs :default) _ nil))))))
 
 (defn- iife?
-  "((fn walk [f] …) x) — first child of the parent list is the fn itself."
   [fn-zloc]
   (let [parent (z/up fn-zloc)]
     (and parent (z/list? parent)
@@ -151,7 +128,6 @@
   #{"run!" "map" "mapv" "keep" "filter" "remove" "reduce" "into" "for" "doseq"})
 
 (defn- fn-escapes?
-  "The fn is returned/stored/passed, not handed to run!/map. A cell, not a fold."
   [fn-zloc]
   (let [parent (z/up fn-zloc)]
     (not (and parent
@@ -160,8 +136,6 @@
               (not (same-form? (first (children parent)) fn-zloc))))))
 
 (defn- decline-fn?
-  "letfn, a fn bound to a local, a named IIFE, or a returned/stored fn.
-   run! (fn step …) still flags."
   [mutate-zloc let-zloc]
   (loop [z mutate-zloc]
     (cond
@@ -306,7 +280,6 @@
       [lhs rhs])))
 
 (defn findings
-  "All place-as-fold findings in a rewrite-clj zipper rooted at the file."
   [file zloc]
   (vec
    (mapcat

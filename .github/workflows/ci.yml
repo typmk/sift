@@ -1,5 +1,3 @@
-# The suite is the gate; bb validate is the measurement and needs oracle
-# dumps that live outside the repo, so it does not run here.
 name: ci
 on: [push, pull_request]
 jobs:
@@ -23,8 +21,6 @@ jobs:
           restore-keys: cdeps-
       - run: clojure -M:test
 
-  # "runs on the JVM and as ClojureScript": every corpus file through
-  # sift/analyze on both, and the two outputs must be identical.
   parity:
     runs-on: ubuntu-latest
     steps:
@@ -50,14 +46,10 @@ jobs:
       - run: clojure -M:cljs && node target/parity.js > node.edn
       - run: test -s jvm.edn && diff jvm.edn node.edn
 
-  # bin/sift under babashka: the flag corpus must report and the clear corpus
-  # must not, per category. performance needs an oracle to be silent and
-  # documentation needs clj-kondo's analysis, so neither is checked here.
   cli:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # bb.edn takes sift from deps.edn, and bb resolves that with Java
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -72,7 +64,6 @@ jobs:
             if bin/sift lint --category $k $c/flag > /dev/null; then echo "flag corpus reported no $k finding"; exit 1; fi
           done
 
-  # sift is a linter; its own source passes one
   lint:
     runs-on: ubuntu-latest
     steps:

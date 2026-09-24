@@ -1,17 +1,8 @@
-;; Clojure static analysis: clojure, rewrite-clj, and a JSON reader for
-;; clj-kondo's analysis output. Nothing else, so it runs as a JVM library, as
-;; ClojureScript and under babashka.
 {:paths ["src"]
  :deps  {org.clojure/clojure     {:mvn/version "1.12.0"}
          org.clojure/data.json   {:mvn/version "2.5.2"}
          rewrite-clj/rewrite-clj {:mvn/version "1.2.55"}}
 
-
- ;; :test is the gate, runnable from a clone of this repo alone.
- ;;
- ;; :parity runs every corpus file through `analyze` and prints the findings
- ;; and unit scores as EDN; :cljs compiles the same namespace for node. CI
- ;; diffs the two outputs.
  :aliases
  {:test
   {:extra-paths ["test"]

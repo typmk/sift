@@ -1,48 +1,8 @@
 (ns net.typemark.sift.oracle
-  "Everything typeflow needs from the JVM, in one run where the project
-  loads:
-
-    cd <project> && sift oracle [--out DIR] <src-root>…
-    cd <project> && clojure -M:sift/oracle [--out DIR] <src-root>…
-
-  The second form is the alias in oracle/deps.edn; the first builds the same
-  classpath from a local sift checkout.
-
-  writes DIR (default oracle/):
-    notes.edn     one #:assay.note{…} per line — the compiler's reflection and
-                  boxed-math warnings while every namespace under the roots
-                  loaded, as data. The line format is assay's, which
-                  bb validate reads; the capture itself is below and needs
-                  nothing but Clojure
-    loaded.edn    the files whose namespace loaded, as \"dir/file.clj\" tails —
-                  a file with no note is either clean or never compiled,
-                  and notes alone cannot say which
-    tags.edn      {:vars {\"ns/name\" \"Tag\"}         return tags on vars: (:tag
-                                                   (meta v)) or the first
-                                                   arglist's, where data.json
-                                                   keeps its ^String
-                   :classes {\"pkg.Outer$Inner\" {:supers […] :fields {\"F\" \"T\"}
-                                                :ctors [{:params […]}]
-                                                :methods {\"m\" [{:params […] :returns \"R\"
-                                                                :static? b :public? b} …]}}
-                   :by-simple {\"Inner\" [\"pkg.Outer$Inner\" …]}}
-                  for every class the corpus imports, hints, calls
-                  statically or constructs, one level of what those return,
-                  and the Clojure collection classes a literal compiles to —
-                  typeflow runs Compiler.paramArgTypeMatch over these
-    analysis.json clj-kondo's analysis, if clj-kondo is on PATH
-
-  Classes are keyed by full name and reached by simple name through
-  :by-simple; a simple name with two classes behind it is resolved by the
-  file's :import in typeflow, which is what the compiler does too."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.java.shell :as sh]))
 
-;; The compiler's own lines, as assay prints them:
-;;   Reflection warning, a/b.clj:9:50 - reference to field length can't be resolved.
-;;   Boxed math warning, a/b.clj:13:48 - call: public static java.lang.Number clojure.lang.Numbers.unchecked_add(java.lang.Object,java.lang.Object).
-;; The file part is greedy: a REPL source name is full of colons.
 (def warning-re #"(?m)^(Reflection|Boxed math) warning, (.*):(\d+):(\d+) - (.*)$")
 (def call-re #"([\w.$]+)\.(\w+)\(([^)]*)\)\s*\.?\s*$")
 (def primitive '#{long double int float boolean char byte short})
@@ -50,8 +10,6 @@
 (defn- simple [t] (last (str/split t #"\.")))
 
 (defn- taken-refused
-  "For a boxed-math call, the overload the compiler took and the fully
-  primitive overloads of the same arity it could have: read off the class."
   [detail]
   (when-let [[_ cls method params] (re-find call-re detail)]
     (let [taken (mapv simple (remove str/blank? (str/split params #",")))
@@ -93,13 +51,6 @@
                        (catch Throwable _ nil)))
         ns-forms (keep read-ns files)
         tail2 (fn [f] (str/join "/" (take-last 2 (str/split (str f) #"/"))))]
-    ;; 1. notes + loaded — PER NAMESPACE: warnings on, *err* caught, require.
-    ;; Thread bindings suffice because `load` reads both flags when it starts a
-    ;; file. A namespace an earlier one already required compiled then, so its
-    ;; notes are in that earlier capture; distinct on the whole collects each
-    ;; once. This was assay.code/watch!, whose sink kept 256 KB and dropped its
-    ;; older half: a numeric library came back with 1,222 of 1,229 notes and typeflow
-    ;; read as 2,314 false positives. A StringWriter per namespace has no cap.
     (let [acc (atom [])
           loaded (doall (for [f files :let [form (read-ns f) n (second form)] :when n
                               :let [err (java.io.StringWriter.)
@@ -117,31 +68,21 @@
       (spit (str out "/notes.edn") (with-out-str (run! prn notes)))
       (spit (str out "/loaded.edn") (with-out-str (prn (vec loaded))))
       (binding [*out* *err*] (println (count files) "files," (count loaded) "loaded," (count notes) "notes")))
-    ;; 2. tags: vars
     (let [nses (->> ns-forms (mapcat (fn [form] (for [c (rest form) :when (and (seq? c) (= :require (first c))) spec (rest c)]
                                                  (cond (symbol? spec) spec (sequential? spec) (first spec)))))
                     (remove nil?) (cons 'clojure.core) (concat (map second ns-forms)) distinct)
-          ;; a namespace that did not load has no interns to read: a plugin's
-          ;; 14 unloadable files threw here and the run wrote no tags.edn at all,
-          ;; so its first score was judged with no table and read as five false
-          ;; reflections
           vars (into (sorted-map)
                      (for [n nses
                            :let [ok (try (require n) (some? (find-ns n)) (catch Throwable _ false))]
                            :when ok
-                           ;; ns-interns, not ns-publics: a defn- carries a return hint the
-                           ;; compiler reads exactly as a public one's — a production service's private
-                           ;; builders were nine false reflections when only publics were dumped
                            [s v] (ns-interns n)
                            :let [m (meta v)
                                  t (or (:tag m) (some-> (:arglists m) first meta :tag)
-                                       ;; a ^:const var is inlined as its value: its class is its tag
                                        (when (and (:const m) (bound? v))
                                          (let [x @v] (cond (instance? Long x) 'long (instance? Double x) 'double
                                                            (string? x) 'String (boolean? x) 'boolean :else nil))))]
                            :when t]
                        [(str n "/" s) (str (if (class? t) (.getName ^Class t) t))]))
-          ;; classes: imports, hints, statics, ctors, plus the literal classes
           imports (for [form ns-forms c (rest form) :when (and (seq? c) (= :import (first c))) spec (rest c)
                         k (cond (symbol? spec) [spec] (sequential? spec) (map #(symbol (str (first spec) "." %)) (rest spec)) :else [])]
                     (str k))
@@ -152,8 +93,6 @@
                         (for [t texts h (re-seq #"\(([A-Z][A-Za-z0-9_.$]*)\.[\s)]" t)] (second h))
                         (for [t texts h (re-seq #"\(reify\s+([A-Za-z][A-Za-z0-9_.$]*)" t)] (second h))
                         (for [t texts h (re-seq #"\(catch\s+([A-Za-z][A-Za-z0-9_.$]*)" t)] (second h)))
-          ;; McpSchema$ServerCapabilities/builder names a nested class through
-          ;; its imported outer class
           resolve-name (fn [h] (or (get by-simple h)
                                    (when-let [[_ outer inner] (re-matches #"([^$.]+)\$(.+)" h)]
                                      (some-> (get by-simple outer) (str "$" inner)))
@@ -170,17 +109,11 @@
                                           :let [r (.getReturnType m)]
                                           :when (and (not (.isPrimitive r)) (not (.isArray r)) (not= Object r) (not (str/starts-with? (.getName r) "java.lang.")))]
                                       r))
-          ;; what dumped methods return, to a fixpoint under a cap: a builder's
-          ;; setters return a NON-PUBLIC base builder (langchain4j), and that
-          ;; class must be here for its methods to be judged non-public
           classes (loop [acc (vec seed) seen (set seed) frontier seed n 0]
                     (let [nxt (->> frontier (mapcat returns-of) distinct (remove seen))]
                       (if (or (empty? nxt) (> n 4) (> (count acc) 3000))
                         acc
                         (recur (into acc nxt) (into seen nxt) nxt (inc n)))))
-          ;; the binary name without its package — Outer$Builder, not Builder:
-          ;; every langchain4j builder is a nested `Builder`, and by simple name
-          ;; the last one dumped won. A hint spells it Outer$Builder too.
           sname (fn [^Class c] (if (.isArray c) (str (.getSimpleName (.getComponentType c)) "[]")
                                    (last (clojure.string/split (.getName c) #"\."))))
           supers (fn [^Class c] (loop [acc #{} q [c]]
@@ -198,8 +131,6 @@
                                                          (filter #(java.lang.reflect.Modifier/isPublic (.getModifiers ^java.lang.reflect.Method %)) (.getMethods c)))]
                                     [n (vec (for [^java.lang.reflect.Method m ms
                                                   :let [pub? (java.lang.reflect.Modifier/isPublic (.getModifiers (.getDeclaringClass m)))
-                                                        ;; Reflector.getAsMethodOfPublicBase: a public class or
-                                                        ;; interface above the declarer with this signature
                                                         base? (or pub?
                                                                   (boolean (some (fn [^Class b] (and (java.lang.reflect.Modifier/isPublic (.getModifiers b))
                                                                                                      (try (.getMethod b (.getName m) (.getParameterTypes m)) true (catch Throwable _ false))))
@@ -212,15 +143,10 @@
                                                        :returns (sname (.getReturnType m))
                                                        :static? (java.lang.reflect.Modifier/isStatic (.getModifiers m))}
                                                 (not base?) (assoc :public? false))))]))})
-          ;; keyed by FULL name; :by-simple is the index a hint or a literal
-          ;; reaches it through, and a simple name with two entries — a file
-          ;; importing java.util.Date and java.sql.Date — is resolved by the file's
-          ;; own :import in typeflow, as the compiler resolves it
           table (into (sorted-map) (for [^Class c classes] [(.getName c) (entry c)]))
           by-simple (reduce (fn [m ^Class c] (update m (sname c) (fnil conj []) (.getName c))) (sorted-map) classes)]
       (spit (str out "/tags.edn") (pr-str {:vars vars :classes table :by-simple by-simple}))
       (binding [*out* *err*] (println (count vars) "tagged vars," (count table) "classes")))
-    ;; 3. kondo, if present
     (let [r (try (apply sh/sh "clj-kondo" "--lint" (concat roots ["--config" "{:analysis {:arglists true :locals true} :output {:format :json}}"]))
                  (catch Throwable _ nil))]
       (if (and r (seq (:out r)))

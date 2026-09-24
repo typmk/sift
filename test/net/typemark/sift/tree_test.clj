@@ -6,8 +6,6 @@
             [rewrite-clj.parser :as p]))
 
 (defn- node-strings
-  "The string of every positioned node, pre-order: what parse stored as
-  :text on every node before inner nodes stopped carrying it."
   [s]
   (letfn [(walk [node]
             (cons (when (:row (meta node)) (n/string node))
@@ -23,9 +21,6 @@
       (is (every? (comp nil? :text) (filter :inner? nodes))))))
 
 (def ^:private sources
-  "Every node shape whose span could disagree with its place in the tree:
-  metadata, reader macros, #(), quotes, #_, (comment), derefs, namespaced
-  maps, a multi-line string, and siblings sharing a line."
   ["(defn f [x] (let [a (atom 0)] (swap! a inc) (if x (swap! a assoc :k x) (swap! a dissoc :k))))"
    "^:m (def ^{:doc \"d\"} y #(inc %)) '(a b) `(c ~d) @x #'v #?(:clj 1 :cljs 2) #?@(:clj [3])"
    "#_(dead (thing)) (comment (x) (y)) #:ns{:a 1 :b [2 3]} #{1 2} {:k (f) :j [g]}"

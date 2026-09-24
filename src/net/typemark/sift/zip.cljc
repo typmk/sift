@@ -1,24 +1,12 @@
 (ns net.typemark.sift.zip
-  "The zipper vocabulary every shape rule reads the tree with. One copy.
-
-  Four rules each carried their own `children`, `peel`, `list-op`,
-  `inside-defn?`, `collect` and `two-binds`, written from the first — the
-  same drift `forms.cljc` exists to stop for the node-stream rules. A rule
-  is its matcher and its counterpart; what a list's head is, what `^meta`
-  hides, and which forms are data belong here.
-
-  Positions are the parser's, 1-based, read by `pos-of` off each node's
-  metadata; no zipper here needs `{:track-position? true}`."
   (:require [rewrite-clj.zip :as z]))
 
 (defn children
-  "Every child location of a branch, left to right."
   [zloc]
   (loop [c (z/down zloc) acc []]
     (if c (recur (z/right c) (conj acc c)) acc)))
 
 (defn peel
-  "`^:places/allow acc` is a :meta node wrapping the form. Walk to the form."
   [zloc]
   (loop [c zloc]
     (if (and c (= :meta (z/tag c)))
@@ -26,35 +14,25 @@
       c)))
 
 (defn sexpr
-  "The form at `zloc`, or `fallback` when it does not read — `#js`, a
-  reader conditional, a regex under cljs."
   ([zloc] (sexpr zloc nil))
   ([zloc fallback]
    (try (z/sexpr zloc) (catch #?(:clj Exception :cljs :default) _ fallback))))
 
 (defn pos-of
-  "[row col] of a location, or nil. Read off the node's metadata, which the
-  parser writes on every node it returns, not from `z/position`, so no
-  zipper needs `{:track-position? true}`. A node built rather than parsed
-  answers nil."
   [zloc]
   (when zloc
     (let [m (meta (z/node zloc))]
       (when (:row m) [(:row m) (:col m)]))))
 
 (defn of-root
-  "A zipper at the root of a tree `rewrite-clj.parser/parse-string-all`
-  returned, without position tracking — see `pos-of`."
   [node]
   (z/of-node* node))
 
 (defn same-form?
-  "Two locations at the same position are the same form."
   [a b]
   (and a b (= (pos-of a) (pos-of b))))
 
 (defn list-op
-  "The head form of a `()` list, seen through `^meta`, or nil."
   [zloc]
   (let [c (peel zloc)]
     (when (and c (z/list? c))
@@ -62,17 +40,14 @@
         (sexpr h)))))
 
 (defn op-name
-  "The unqualified name of a head symbol, or nil."
   [sym]
   (when (symbol? sym) (name sym)))
 
 (defn head-name
-  "`(list-op zloc)` as a name, or nil."
   [zloc]
   (op-name (list-op zloc)))
 
 (defn token-name
-  "The name of a symbol token, seen through `^meta`, or nil."
   [zloc]
   (let [c (peel zloc)]
     (when (and c (= :token (z/tag c)))
@@ -80,17 +55,13 @@
         (when (symbol? s) (name s))))))
 
 (defn call?
-  "A sexpr that is `(n …)` for the unqualified name `n`."
   [form n]
   (and (seq? form) (symbol? (first form)) (= n (name (first form)))))
 
 (def defining-forms
-  "Heads under which a rule looks — a top-level `(let …)` is data being
-  built, not a function being written."
   #{"defn" "defn-" "fn" "fn*" "defmacro" "defmethod"})
 
 (defn inside-defn?
-  "Is some ancestor a function-defining form?"
   [zloc]
   (loop [c (z/up zloc)]
     (cond
@@ -99,7 +70,6 @@
       :else (recur (z/up c)))))
 
 (defn opaque?
-  "`#_`, `'…` and `(comment …)`: children are not runtime code."
   [zloc]
   (or (= :uneval (z/tag zloc))
       (= :quote (z/tag zloc))
@@ -115,18 +85,13 @@
       @acc)))
 
 (def ^:dynamic *locations*
-  "`(locations root)`, bound by a caller that collects from one root many
-  times, so `collect` at that root filters it instead of walking again."
   nil)
 
 (defn locations
-  "Every location under a root zipper, in `collect`'s order."
   [zloc]
   {:root (z/node zloc) :locs (walk-collect zloc (constantly true))})
 
 (defn collect
-  "Every location under `zloc` (itself included) satisfying `pred`, in
-  document order, never descending into opaque forms."
   [zloc pred]
   (let [{:keys [root locs]} *locations*]
     (if (and zloc root (identical? root (z/node zloc)))
@@ -134,7 +99,6 @@
       (walk-collect zloc pred))))
 
 (defn lists-headed
-  "Every `(n …)` list under `zloc` whose head name is in `names`."
   [zloc names]
   (collect zloc (fn [c] (contains? names (head-name c)))))
 
@@ -142,14 +106,12 @@
   #{"let" "let*" "loop" "doseq" "for" "dotimes" "binding"})
 
 (defn binder-vec
-  "The binding vector of a binding form, or nil."
   [zloc]
   (when (contains? binding-forms (head-name zloc))
     (when-let [v (z/right (z/down (peel zloc)))]
       (when (z/vector? v) v))))
 
 (defn vec-pairs
-  "A flat binding vector as [[lhs-zloc rhs-zloc] …]."
   [vz]
   (loop [c (z/down vz) acc []]
     (if (nil? c)
@@ -159,9 +121,6 @@
         acc))))
 
 (defn two-binds
-  "Exactly two bindings, both readable, as [[sym init] [sym init]] sexprs;
-  nil for anything else. The shape `loop-as-map` and `loop-as-reduce`
-  match against."
   [zloc]
   (when-let [vz (binder-vec zloc)]
     (let [pairs (mapv (fn [[l r]] [(sexpr (peel l) ::no) (sexpr r ::no)]) (vec-pairs vz))]
@@ -170,8 +129,6 @@
         pairs))))
 
 (defn single-body
-  "The one body form of a binding form as a sexpr, or nil when there are
-  zero or several."
   [zloc]
   (when-let [d (z/down (peel zloc))]
     (when-let [vz (z/right d)]

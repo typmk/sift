@@ -1,8 +1,4 @@
 (ns net.typemark.sift.parity
-  "Every file of the test corpus through `sift/analyze`, printed as sorted
-  EDN — [path rule line] per finding and [path name cognitive cyclomatic] per
-  unit. CI runs this on the JVM and on node and diffs the two, which is what
-  \"runs on both\" means."
   (:require [net.typemark.sift :as sift]
             [clojure.string :as str]
             #?(:cljs ["fs" :as fs])

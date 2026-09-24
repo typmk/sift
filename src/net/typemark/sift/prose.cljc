@@ -1,30 +1,4 @@
 (ns net.typemark.sift.prose
-  "Docstrings, judged the way Vale judges prose — a few rule KINDS over
-  what clj-kondo's analysis already carries: every var's `doc`, its
-  `arglist-strs`, its row span, and every namespace's `doc`. No parsing of
-  its own; `dictionary.cljc` reads the same input for the banned-term
-  table and this is its sibling.
-
-  The smells are the ones generated docstrings have and hand-written ones
-  do not, each Vale's kind in brackets:
-
-    :doc/restates-name   [repetition]  \"Parses the config.\" on parse-config —
-                          the doc's content words are the name's tokens.
-    :doc/hedge           [existence]   \"This function…\", \"is used to\",
-                          \"simply\", \"basically\", \"in order to\".
-    :doc/params-unnamed  [sequence]    two or more parameters, a SHORT doc
-                          (25 words or fewer), and it names none of them.
-                          Measured on a code-graph tool without the length guard: 272
-                          hits, every one a long docstring that explains the
-                          design and never says `from-name` — not the smell.
-    :doc/placeholder     [existence]   TODO / FIXME / XXX / \"write this\".
-    :doc/ns-missing      [occurrence]  a namespace with no docstring, or one
-                          under four words.
-
-  Each finding lands on the var (or the ns form) at kondo's name position,
-  so a consumer can attach it to the definition. Corpus as spec:
-  corpus/prose/{docs.clj, docs.analysis.json} — the JSON is what kondo
-  emitted over the file beside it, with paths relativised."
   (:require [clojure.string :as str]
             [net.typemark.sift.json :as json]))
 
@@ -41,13 +15,11 @@
                         :instruction "A namespace docstring says what lives here and why it is separate; one sentence is enough."}})
 
 (def hedges
-  "Phrases that describe the docstring instead of the function."
   ["this function" "this fn" "this method" "is used to" "is responsible for"
    "simply" "basically" "essentially" "in order to" "the purpose of" "helper function"
    "utility function" "as the name suggests"])
 
 (def placeholder-tokens
-  "Tokens that mark a docstring as unwritten."
   ["TODO" "FIXME" "XXX" "write this" "fill in" "WIP"])
 
 (def ^:private placeholders
@@ -62,13 +34,10 @@
        (remove str/blank?)))
 
 (defn- stem
-  "Cheap: strip a trailing s/es/ing/ed so `parses` meets `parse`."
   [w]
   (-> w (str/replace #"(ing|ed|es|s)$" "")))
 
 (defn- same-word?
-  "`pars`/`parse`, `config`/`configs`: equal after stemming, or one a prefix
-  of the other at four letters or more."
   [a b]
   (or (= a b)
       (and (>= (min (count a) (count b)) 4)
@@ -81,8 +50,6 @@
   (into #{} (comp (remove stop-words) (map stem)) (words doc)))
 
 (defn- param-names
-  "Symbols in the first arglist string, destructuring flattened: `[path opts]`
-  -> #{path opts}; `[{:keys [a b]} & more]` -> #{a b more}."
   [arglist-strs]
   (into #{}
         (comp (mapcat #(re-seq #"[a-zA-Z][a-zA-Z0-9*+!?<>=-]*" %))
@@ -90,7 +57,6 @@
         arglist-strs))
 
 (defn- quote-re
-  "Regex-quote a parameter name portably — Pattern/quote is JVM-only."
   [s]
   (str/replace s #"[.*+?^${}()|\[\]\\]" "\\$0"))
 
@@ -131,8 +97,6 @@
 
           (and (>= (count args) 2)
                (<= (count (words doc)) 25)
-               ;; a parameter counts as named if the doc says it, or any
-               ;; three-letter piece of it: `from-name` is named by "name".
                (not-any? (fn [p]
                            (some #(re-find (re-pattern (str "(?i)(^|[^a-z0-9])" (quote-re %) "([^a-z0-9]|$)")) doc)
                                  (cons p (filter #(>= (count %) 3) (str/split p #"[-_]")))))
@@ -150,8 +114,6 @@
                   "namespace has no docstring"))])))
 
 (defn findings
-  "analysis JSON text -> {filename [finding …]}, the shape `dictionary`
-  returns, so the two merge into one prose pass."
   [analysis-text]
   (let [a (get (json/read-str analysis-text) "analysis")
         per-var (for [v (get a "var-definitions" [])

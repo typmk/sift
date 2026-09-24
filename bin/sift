@@ -1,7 +1,4 @@
 #!/usr/bin/env bb
-;; `sift` from a clone: puts src/ on the classpath and runs net.typemark.sift.cli.
-;; `bbin install io.github.typmk/sift` installs the same entry point without a
-;; clone (bb.edn's :bbin/bin).
 (require '[babashka.classpath :as cp] '[babashka.fs :as fs])
 (cp/add-classpath (str (fs/parent (fs/parent (fs/real-path *file*))) "/src"))
 (require 'net.typemark.sift.cli)

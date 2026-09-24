@@ -54,13 +54,6 @@
 (deftest no-seeds-means-no-findings
   (is (empty? (cg/findings analysis {:taints #{} :reaches #{}}))))
 
-
-;; ---------------------------------------------------------------------------
-;; A usage inside a protocol implementation or a multimethod arm carries NO
-;; from-var, because neither defines a var. Every one of them used to be
-;; dropped, which made polymorphic dispatch invisible to taint propagation --
-;; in Clojure, exactly where request handling tends to live.
-
 (def poly
   (str "{\"analysis\":{"
        "\"var-definitions\":["
@@ -70,14 +63,11 @@
        "\"protocol-name\":\"IRender\",\"method-name\":\"-render\","
        "\"row\":10,\"end-row\":12}],"
        "\"var-usages\":["
-       ;; inside the impl body: no from-var, was dropped
        "{\"filename\":\"h.clj\",\"from\":\"h\",\"to\":\"probe\",\"name\":\"danger\","
        "\"row\":11,\"name-row\":11,\"name-col\":5,\"name-end-row\":11,\"name-end-col\":11},"
-       ;; the defmethod marker: names the arm, is not itself a call
        "{\"filename\":\"h.clj\",\"from\":\"h\",\"to\":\"h\",\"name\":\"handle\","
        "\"defmethod\":true,\"dispatch-val-str\":\":upload\","
        "\"row\":20,\"name-row\":20,\"name-col\":12,\"name-end-row\":20,\"name-end-col\":18},"
-       ;; inside that arm's body: no from-var either
        "{\"filename\":\"h.clj\",\"from\":\"h\",\"to\":\"probe\",\"name\":\"untrusted\","
        "\"row\":21,\"name-row\":21,\"name-col\":5,\"name-end-row\":21,\"name-end-col\":14}"
        "]}}"))
@@ -121,11 +111,6 @@
       (is (contains? taints ["h" "handle::upload"]))
       (is (contains? taints ["h" "handle"])))))
 
-;; A dispatch value that is a FORM names nothing. Taking its text gave
-;; `handle::(:k m)`, a node shaped like an arm that names no arm -- and the tree-sitter
-;; parser, which this join is keyed against, stopped minting those on
-;; 2026-09-17. MEASURED on a production service: 42 defmethod-marked usages, 40 literal, 2 not.
-
 (def computed-arm
   (str "{\"analysis\":{"
        "\"var-definitions\":["
@@ -160,11 +145,6 @@
     (testing "and owns its own body, not the computed arm's"
       (is (= #{["probe" "other"]}
              (set (map :callee (get g ["c" "handle::[:a :b]"]))))))))
-
-;; An arm belongs to the multimethod's namespace, not the file it is written
-;; in. A defmethod in another file extends THAT multi, so its identity lives
-;; where the defmulti does. Same-namespace fixtures cannot tell the two apart,
-;; which is why this one is cross-namespace.
 
 (def foreign-arm
   (str "{\"analysis\":{"

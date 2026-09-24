@@ -1,8 +1,5 @@
-;; Maintainer tasks. sift itself comes from deps.edn (:local/root), so bb runs
-;; the same dependency versions the JVM suite does; script/ holds the task code.
 {:paths ["script"]
  :deps  {net.typemark/sift {:local/root "."}}
- ;; `bbin install io.github.typmk/sift` reads this to install the `sift` command
  :bbin/bin {sift {:main-opts ["-m" "net.typemark.sift.cli"]}}
  :tasks
  {:requires ([babashka.fs :as fs] [clojure.string :as str])

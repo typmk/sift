@@ -1,6 +1,4 @@
 (ns net.typemark.sift.prose-test
-  "corpus/prose/docs.analysis.json is what clj-kondo emitted over docs.clj
-  beside it (`{:analysis {:arglists true}}`); the assertions are per var."
   (:require [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing]]
             [net.typemark.sift.prose :as prose]))

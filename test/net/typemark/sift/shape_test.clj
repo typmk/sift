@@ -1,8 +1,4 @@
 (ns net.typemark.sift.shape-test
-  "The corpus is the spec, as it was in the earlier `places` rule set: every file under
-  corpus/clear stays silent, every file under corpus/flag fires. Ported
-  from places_test.clj with the CLI-only cases (`lint` over dirs, `--apply`)
-  dropped — sift never writes."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
@@ -92,8 +88,6 @@
 (deftest unreadable-source-is-silent-not-thrown
   (is (= [] (shape/findings "(defn f [x" "bad.clj"))))
 
-;; ---- resolution: what only clj-kondo can say --------------------------------
-
 (deftest resolution-sees-aliased-core-and-ignores-shadowed
   (let [f    (at "resolved/aliased_core_atom.clj")
         idx  (resolve/index (slurp (at "resolved/aliased_core_atom.analysis.json")))
@@ -104,8 +98,6 @@
     (testing "with it: the aliased atom is found, the parameter named swap! is not a mutator"
       (is (= [5] (map :line res)))
       (is (= :machine-applicable (:applicability (first res)))))))
-
-;; ---- cond-as-case -----------------------------------------------------------
 
 (deftest cond-over-literals-is-a-case
   (let [fs (lint (at "flag/cond_case.clj"))]
@@ -124,8 +116,6 @@
     (is (= :unspecified (:applicability (first fs))))
     (is (nil? (:counterpart (first fs))))))
 
-;; ---- loop-as-reduce ---------------------------------------------------------
-
 (deftest loop-threading-an-accumulator-is-a-reduce
   (let [fs (lint (at "flag/loop_reduce.clj"))]
     (is (= [:loop-as-reduce :loop-as-reduce :loop-as-reduce] (map :rule fs)))
@@ -140,9 +130,6 @@
   (let [fs (lint (at "flag/loop_map.clj"))]
     (is (= 1 (count fs)))
     (is (= :loop-as-map (:rule (first fs))))))
-
-
-;; ---- host boundary ----------------------------------------------------------
 
 (deftest host-escapes-fire-on-the-jvm-file
   (let [fs (lint (at "flag/host_escapes.clj"))
@@ -162,8 +149,6 @@
 (deftest host-clear-files-are-silent
   (is (empty? (lint (at "clear/host_ok.clj"))))
   (is (empty? (lint (at "clear/host_js_ok.cljs")))))
-
-;; ---- rules as data ----------------------------------------------------------
 
 (deftest every-data-rule-fires-once-on-its-flag-line-and-never-on-clear
   (let [ids (set (map :id data/rules))

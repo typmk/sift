@@ -1,27 +1,4 @@
 (ns validate
-  "The scorecard: everything sift claims, re-measured in one run.
-
-    bb validate               all corpora in corpora/*.edn
-    bb validate sift cherry   named ones
-
-  For each corpus with an oracle directory (`sift oracle`'s output for the JVM,
-  a shadow-cljs release log plus `sift oracle --js`'s externs.edn for JS — kept
-  at :oracle, outside the repo, because notes name private files): typeflow's
-  predictions against the compiler's warnings, precision and recall, with
-  the corpus's :role beside the number — an :in-sample corpus is one the
-  rules were learned from and its score is a fit; :held-out and :blind are
-  forecasts. A corpus whose oracle is absent is reported as SKIPPED, never
-  silently dropped. Then the evidence ledger's rung counts, derived from
-  every rule's registry entry, so how many rules are still :unjudged is
-  printed beside the numbers that are not.
-
-  The judging itself (what bin/falsify did until 2026-08-28) lives here:
-  oracle notes and predictions are joined on the longest path suffix, only
-  files the compiler loaded are judged, and an :in-sample label is the
-  honest one for any corpus a rule was learned from.
-
-  The unit suite (clojure -M:test) is the other half and is not run here:
-  it is the gate, this is the measurement."
   (:require [babashka.fs :as fs]
             [clojure.edn :as edn]
             [clojure.set :as set]
@@ -31,14 +8,12 @@
             [net.typemark.sift.resolve :as resolve]))
 
 (def here
-  "The repository root: bb.edn's :paths put this file at script/validate.clj."
   (fs/parent (fs/parent (fs/real-path *file*))))
 
 (defn expand [s] (str/replace s #"^~" (System/getProperty "user.home")))
 (defn tail2 [p] (str/join "/" (take-last 2 (str/split (str p) #"/"))))
 
 (defn judge
-  "One corpus, one kind: {:oracle n :predicted n :tp n :fp n :fn n :p :r :fns :fps}."
   [root odir kind]
   (let [kind (keyword kind)
         js? (fs/exists? (str odir "/closure.log"))
@@ -74,19 +49,12 @@
      :fns (sort (set/difference oracle preds)) :fps (sort (set/difference preds oracle))}))
 
 (defn- newest
-  "The newest mtime under a root, over the files a compiler would read."
   [root]
   (->> (fs/glob root "**.{clj,cljc,cljs}")
        (map #(.toMillis (fs/last-modified-time %)))
        (reduce max 0)))
 
 (defn- staleness
-  "How far behind the corpus its oracle is, in days, or nil when the dump is
-  newer than every source file. An oracle decays silently: sift's own read
-  P 0.933 for two weeks because its dump was taken on 2026-08-27 and
-  callgraph.cljc changed on 2026-09-04, and every one of those four 'false
-  positives' was a site the instrument had never seen. SKIPPED is printed
-  for an absent oracle; nothing was printed for a stale one."
   [root oracle]
   (let [dump (first (filter fs/exists? [(str oracle "/notes.edn") (str oracle "/closure.log")]))
         dumped (when dump (.toMillis (fs/last-modified-time dump)))
@@ -95,7 +63,6 @@
       (int (Math/ceil (/ (- src dumped) 86400000.0))))))
 
 (defn -main
-  "`bb validate [--residue] [corpus …]`"
   [& args]
   (let [residue? (some #{"--residue"} args)
         names (disj (set args) "--residue")
@@ -109,16 +76,12 @@
       (if-not (and (or (fs/exists? (str oracle "/notes.edn")) (fs/exists? (str oracle "/closure.log"))) (fs/exists? root))
         (printf "%-12s %-10s SKIPPED — %s%n" name (clojure.core/name role)
                 (if (fs/exists? root) (str "no oracle at " oracle " (run sift oracle in the project)") (str "no source at " root)))
-        ;; :kinds in the manifest restricts what this oracle can judge — a
-        ;; classpath run that warns on reflection but cannot on boxing
         (do
          (when-let [d (staleness root oracle)]
            (printf "%-12s %-10s STALE — the oracle is %d day(s) behind this source; re-run sift oracle before believing the score%n"
                    name (clojure.core/name role) d))
          (doseq [kind (or kinds (if (fs/exists? (str oracle "/closure.log")) ["uninferred"] ["boxed-math" "reflection"]))]
           (let [{:keys [oracle predicted tp fp fn p r fns fps]} (judge root oracle kind)]
-            ;; 0 predicted / 0 in the oracle is a correct empty, not a score of
-            ;; zero — P 0.000 there reads as failure and is nothing of the kind.
             (printf "%-12s %-10s %-11s %4d %4d %4d %4d %4d  P %s R %s%n" name (clojure.core/name role) kind oracle predicted tp fp fn
                     (if (pos? predicted) (format "%.3f" p) "  —  ") (if (pos? oracle) (format "%.3f" r) "  —  "))
             (when residue?

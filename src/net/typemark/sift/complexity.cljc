@@ -1,51 +1,14 @@
 (ns net.typemark.sift.complexity
-  "Per-function Cognitive Complexity (Campbell, SonarSource 2017) and
-  Cyclomatic Complexity (McCabe) over the rewrite-clj tree, plus the two
-  shape metrics DCM reports beside them: maximum nesting and parameter count.
-
-  `metrics.cljc` answers per FILE, which is what a Sonar dashboard divides by.
-  This answers per UNIT, which is what a reviewer acts on. The two are not
-  the same fold: a file total is every increment once, a unit total resets
-  nesting at its own boundary and reports the functions inside it as
-  children, exactly as cccc-core does — measured against it on this repo so
-  that the number a Rust binary would print and the number this prints are
-  the same number.
-
-  Two rules where this deliberately departs from cccc, both stated so the
-  delta can be measured rather than discovered:
-
-  - `(comment …)` is data. cccc lowers its body as code; clj-kondo, this
-    library's `parse` and every reader treat it as inert.
-  - `recur` with no enclosing `loop` is recursion, +1, the same as calling
-    the function by name. cccc counts only the named call.
-
-  The unit rule is POSITIONAL, not a list of macros: any top-level
-  `(def… name …)` whose leaf starts with `def` is a unit named `name`, so
-  `deftest`, `deftool`, `defcap` and next week's macro are seen without a
-  config nobody fills in. Measured on a code-graph tool before that rule existed: 696
-  deftests and 31 deftools reported nothing, and the #1 result had no name.
-
-  Sonar's own JS implementation (S3776) scores `||`/`??` at 0 and recursion
-  at 0. That is a product decision; this follows the whitepaper, as
-  cccc-core does. Expect this to read one higher per `or` sequence and per
-  self-call than a Sonar dashboard would."
   (:require [clojure.string :as str]
             [rewrite-clj.node :as n]
             [rewrite-clj.parser :as p]))
 
 #?(:clj (set! *warn-on-reflection* true))
 
-;; ---- reading the tree ---------------------------------------------------
-
 (def ^:private trivia
-  "Whitespace and comments. A `;;` inside a form is a `:comment` NODE in
-  rewrite-clj, and a positional read that keeps it takes it for the `then`
-  of an `if-let` or the init of a binding — measured on a code-graph tool: 26 units
-  disagreed with cccc, every one over a comment sitting between forms."
   #{:whitespace :newline :comma :comment :uneval})
 
 (defn- kids
-  "Children that are code."
   [node]
   (when (n/inner? node)
     (remove #(contains? trivia (n/tag %)) (n/children node))))
@@ -54,14 +17,12 @@
 (defn- end-line-of [node] (:end-row (meta node)))
 
 (defn- unwrap-meta
-  "`^:async x` -> x. Metadata is inert for every rule here."
   [node]
   (if (= :meta (n/tag node))
     (recur (last (kids node)))
     node))
 
 (defn- sym-text
-  "The text of a symbol node, or nil."
   [node]
   (let [node (unwrap-meta node)]
     (when (= :token (n/tag node))
@@ -72,7 +33,6 @@
           t)))))
 
 (defn- leaf
-  "`mcp/deftool` -> `deftool`; a bare `/` is its own leaf."
   [s]
   (if-let [i (and s (str/last-index-of s "/"))]
     (if (< (inc i) (count s)) (subs s (inc i)) s)
@@ -83,7 +43,6 @@
 (defn- head [node] (when (lst? node) (some-> (first (kids node)) sym-text leaf)))
 
 (defn- name-text
-  "What a `def…` binds: symbol, keyword or string, seen through `^meta`."
   [node]
   (let [node (unwrap-meta node)]
     (when (= :token (n/tag node))
@@ -95,26 +54,11 @@
 
 (defn- fn-form? [node] (contains? #{"fn" "fn*"} (head node)))
 
-;; ---- lowering: tree -> IR -----------------------------------------------
-;;
-;; The IR is cccc-core's, as maps:
-;;   {:ir :function :name :kind :line :end-line :params :body [..]}
-;;   {:ir :branch :test [..] :then [..] :else ir-or-nil}   when/cond
-;;   {:ir :conditional :test [..] :then [..] :else [..]}   if (a ternary)
-;;   {:ir :loop :body [..]}
-;;   {:ir :switch :cases [{:default? bool :body [..]} ..]}
-;;   {:ir :catch :body [..]}
-;;   {:ir :logical :op "and"|"or" :operands [[..] ..]}
-;;   {:ir :call :callee "name"}    {:ir :recur}    {:ir :group :body [..]}
-
 (declare lower)
 
 (defn- lower-seq [ctx nodes] (vec (mapcat #(lower ctx %) nodes)))
 
 (defn- string-node?
-  "A one-line string is a `:token`; one spanning lines is `:multi-line`.
-  Measured: missing the second dropped the body of every defn with a
-  multi-line docstring, 350 units on a code-graph tool, each scoring 0."
   [node]
   (and node (or (= :multi-line (n/tag node))
                 (and (= :token (n/tag node)) (str/starts-with? (n/string node) "\"")))))
@@ -125,12 +69,10 @@
     true (as-> ns' (if (some-> (first ns') n/tag (= :map)) (rest ns') ns'))))
 
 (defn- param-count
-  "Symbols in an arg vector, `&` excluded; a destructuring form counts once."
   [argv]
   (count (remove #(= "&" (sym-text %)) (kids argv))))
 
 (defn- arities
-  "`[args] body…` or `([args] body…)…` -> [{:params n :body [nodes]} …]."
   [rest-nodes]
   (if (vec? (unwrap-meta (or (first rest-nodes) (n/token-node nil))))
     [{:params (param-count (unwrap-meta (first rest-nodes))) :body (rest rest-nodes)}]
@@ -153,9 +95,6 @@
     ["<fn>" (rest items)]))
 
 (defn- inline-fn
-  "A `(fn …)` directly in a def body, or one call-wrapper deep
-  (`(with-auto-index (fn …))`), is the unit's own body. Returns IR nodes, or
-  nil when `node` is neither."
   [ctx node wrap]
   (when (lst? node)
     (let [items (kids node)]
@@ -169,7 +108,6 @@
               (mapcat #(or (inline-fn ctx % (dec wrap)) (lower ctx %)) (rest items)))))))
 
 (defn- def-macro-ir
-  "`(def<x> name doc? meta? body…)`: a unit named `name`, kind = the macro."
   [ctx node items kind]
   (let [nm   (or (name-text (second items)) "<def>")
         body (skip-doc-and-meta (drop 2 items))]
@@ -186,9 +124,6 @@
          (and m (sym-text m) argv (vec? (unwrap-meta argv))))))
 
 (defn- methods-ir
-  "`defrecord`/`deftype` (`fixed?` — the type name is the owner) and
-  `reify`/`extend-protocol`/…: every `(m [args] body…)` is a `method` unit
-  named `Owner/m`. Under `extend-*` a bare symbol renames the owner."
   [ctx node items fixed?]
   (let [h     (head node)
         owner (if fixed? (or (some-> (second items) sym-text) "<type>") h)
@@ -213,7 +148,6 @@
         acc))))
 
 (defn- binding-inits
-  "A binding vector is flat `[name init …]`; the inits are code."
   [ctx bvec]
   (when (and bvec (vec? bvec))
     (lower-seq ctx (take-nth 2 (rest (kids bvec))))))
@@ -222,8 +156,6 @@
   (contains? #{":else" ":default"} (some-> node n/string)))
 
 (defn- cond-chain
-  "`cond` pairs -> a branch chain: the first test is structural, each next
-  one is an `else if` (+1 flat), `:else` is a plain else."
   [ctx pairs]
   (when-let [[test expr & more] (seq pairs)]
     (if (else-keyword? test)
@@ -251,10 +183,6 @@
                (rest items))))
 
 (defn- logical-ir [ctx op args]
-  ;; Like operators flatten into one sequence; a different operator nested
-  ;; inside is its own sequence, which is what visit_logical charges for.
-  ;; Only a `(or …)` LIST flattens; `#(or …)` is a lambda whose body
-  ;; happens to start with `or`, and it is its own unit.
   (let [operands (mapcat (fn [a]
                            (if (and (= :list (n/tag a)) (= op (head a)))
                              (:operands (first (logical-ir ctx op (rest (kids a)))))
@@ -305,10 +233,6 @@
       ("reify" "extend-protocol" "extend-type" "specify!" "proxy" "extend")
       (methods-ir ctx node items false)
 
-      ;; `if` is an expression, so it is scored as Sonar scores a ternary:
-      ;; +1 and nesting, both arms nested, and no `else` increment — a
-      ;; Clojure `if` has no else keyword to charge for. `cond` chains do
-      ;; charge for `:else`, as a statement chain would.
       ("if" "if-not" "if-let" "if-some")
       (let [[_ test then else] items]
         [{:ir :conditional
@@ -333,8 +257,6 @@
 
       ("and" "or") (logical-ir ctx h (rest items))
 
-      ;; Binding inits are evaluated OUTSIDE the loop's nesting — a `:when`
-      ;; test in a `for` is not inside the body it guards.
       ("loop" "doseq" "dotimes" "for")
       (conj (binding-inits ctx (second items))
             {:ir :loop :body (lower-seq (assoc ctx :in-loop? true) (drop 2 items))})
@@ -361,13 +283,10 @@
               (lower-seq ctx (if (sym-text (first items)) (rest items) items))))))))
 
 (defn lower
-  "One rewrite-clj node -> IR nodes."
   [ctx node]
   (case (n/tag node)
     :list (lower-list ctx node)
     (:vector :map :set) (lower-seq ctx (kids node))
-    ;; `#(…)` is the list itself with a `#` in front: its head is its first
-    ;; child, so the body is the form lowered as a list.
     :fn [{:ir :function :name "<fn>" :kind "fn"
           :line (line-of node) :end-line (end-line-of node)
           :params (count (distinct (re-seq #"%\d*&?" (n/string node))))
@@ -390,8 +309,6 @@
         :else []))
     (if (n/inner? node) (lower-seq ctx (kids node)) [])))
 
-;; ---- scoring: IR -> report ----------------------------------------------
-
 (declare score-node score-function)
 (defn- score-nodes [frame nodes n]
   (reduce #(score-node %1 %2 n) frame nodes))
@@ -409,7 +326,6 @@
         (score-nodes (:then else) (inc n))
         (score-else (:else else) n))
     :else (-> frame (update :cognitive inc) (score-nodes (:body else) (inc n)))))
-
 
 (defn score-node [frame node n]
   (case (:ir node)
@@ -444,15 +360,10 @@
                        body 0)]
     (assoc f :loc (inc (- end-line line)))))
 
-;; ---- entry points -------------------------------------------------------
-
 (defn- features-for [path]
   (if (and path (str/ends-with? path ".cljs")) #{":cljs" ":default"} #{":clj" ":default"}))
 
 (defn- functions-in
-  "Every `:function` IR node under `nodes`, at any depth, in order — a
-  lambda inside module-level code (`(when x (.on p \"exit\" #(…)))`) is a
-  unit even though nothing named encloses it."
   [nodes]
   (mapcat (fn [node]
             (if (= :function (:ir node))
@@ -465,8 +376,6 @@
           nodes))
 
 (defn- guarded
-  "{:ok? false :error msg} for anything `f` throws: a source that does not
-  read, or a form the lowering does not know."
   [f]
   (try
     (f)
@@ -480,39 +389,27 @@
      :functions (mapv score-function (functions-in units))}))
 
 (defn report
-  "Source -> {:ok? true :functions [unit …]} or {:ok? false :error msg}.
-
-  A unit is {:name :kind :line :end-line :loc :params :cognitive :cyclomatic
-  :max-nesting :children [unit …]}. `path` decides which `#?` branch is
-  scored (`.cljs` -> :cljs, else :clj); nil means :clj."
   ([source] (report source nil))
   ([source path]
    (guarded #(score-root (p/parse-string-all source) path))))
 
 (defn report-of
-  "`report` over a tree `rewrite-clj.parser/parse-string-all` already
-  returned — `analyze` parses once for every rule family."
   [root path]
   (guarded #(score-root root path)))
 
 (defn flatten-units
-  "Every unit at every depth, parents before children."
   [units]
   (mapcat (fn [u] (cons (dissoc u :children) (flatten-units (:children u)))) units))
 
 (def default-threshold
-  "Sonar's default for S3776. A function above it is reported."
   15)
 
 (defn over-threshold
-  "The findings for the units over `threshold` in a `report` already made."
   [{:keys [ok? functions]} threshold]
   (when ok?
     (for [u (flatten-units functions) :when (> (:cognitive u) threshold)]
       {:rule    :cognitive-complexity
        :evidence :parity :note "5,519/5,531 units vs cccc on a code-graph tool; Spearman 0.989 vs SonarJS on LightTable"
-       ;; the unit's name as :symbol, not only in the message — the self-run
-       ;; found every complexity finding carrying :symbol nil
        :symbol  (some-> (:name u) symbol)
        :line    (:line u) :col 1 :end-line (:line u) :end-col 2
        :message (str (:name u) " has cognitive complexity " (:cognitive u)
@@ -522,7 +419,6 @@
        :function (:name u)})))
 
 (defn findings
-  "Units over `threshold`, in the shape every other sift rule emits."
   ([source path] (findings source path default-threshold))
   ([source path threshold]
    (over-threshold (report source path) threshold)))

@@ -1,9 +1,4 @@
 (ns net.typemark.sift.typeflow-test
-  "Every assertion here was first checked against assay's notes — the JVM
-  compiler's own reflection and boxed-math warnings — over three corpora:
-  sift itself (boxed 44/45), a single-user ledger library (reflection 1/1) and a production service (boxed
-  P 0.87 R 0.98, reflection P 0.58 R 0.96). The fixtures are the shapes
-  those runs taught; the numbers are in the README."
   (:require [clojure.test :refer [deftest is testing]]
             [net.typemark.sift.typeflow :as tf]))
 
@@ -68,13 +63,9 @@
         "an undumped static is known, unnamed")))
 
 (deftest the-js-host-predicts-without-an-externs-set-too
-  ;; the 648-vs-0 that once switched this host off was an empty oracle judging
-  ;; a model; with no externs set every non-js member access is reported
   (is (= [:uninferred] (mapv :kind (remove #(= :reflection-unwarned (:kind %)) (tf/predictions "(defn f [x] (.foo x))" "x.cljs" :js))))))
 
 (def classes
-  "A slice of what `sift oracle` dumps, enough for the assertions below —
-  supers, constructors and methods with parameter types."
   {"OutputStreamWriter" {:supers ["Writer" "Object"] :ctors [{:params ["OutputStream"]} {:params ["OutputStream" "String"]} {:params ["OutputStream" "Charset"]}]
                          :methods {"write" [{:params ["String"] :returns "void"} {:params ["char[]"] :returns "void"} {:params ["int"] :returns "void"}
                                             {:params ["String" "int" "int"] :returns "void"}]}}
@@ -83,7 +74,6 @@
    "URL" {:supers ["Object"] :ctors [{:params ["String"]} {:params ["URL" "String"]} {:params ["String" "String" "int" "String"]}] :methods {}}
    "ProcessBuilder" {:supers ["Object"] :ctors [{:params ["List"]} {:params ["String[]"]}] :methods {"start" [{:params [] :returns "Process"}]}}
    "Builder" {:supers ["Object"] :ctors [] :methods {"temperature" [{:params ["Double"] :returns "Builder"}]
-                                                      ;; declared only on a package-private base: Reflector.getAsMethodOfPublicBase finds nothing
                                                       "maxRetries" [{:params ["Integer"] :returns "Builder" :public? false}]
                                                       "modelName" [{:params ["String"] :returns "Builder"}]
                                                       "anyOf" [{:params ["List"] :returns "Builder"} {:params ["JsonSchemaElement[]"] :returns "Builder"}]
@@ -95,15 +85,11 @@
    "IPersistentVector" {:supers ["Sequential" "Object"]}
    "String" {:supers ["CharSequence" "Object"] :methods {"indexOf" [{:params ["String"] :returns "int"} {:params ["int"] :returns "int"}]}}})
 (def dump
-  "The tags.edn shape: classes by full name, reached by simple name."
   {:classes (into {} (map (fn [[k v]] [(str "x." k) v])) classes)
    :by-simple (into {} (map (fn [[k _]] [k [(str "x." k)]])) classes)})
 (defn- judged [src] (kinds* src {:classes dump}))
 
 (deftest what-a-production-service-taught-once-every-file-was-judged
-  ;; bin/assay-notes writes loaded.edn; before it, five "false positives" were
-  ;; in test files the compiler never compiled. These are the model errors
-  ;; that were left once only judged files counted — a production service 106/106, 26/26.
   (testing "only the two-argument comparison is :inline; three arguments is a plain call and never warns"
     (is (= [] (kinds "(defn f [status] (<= 200 status 299))")))
     (is (= [:boxed-math] (kinds "(defn f [lo hi] (<= lo hi))"))))
@@ -155,7 +141,6 @@
     (is (= [:reflection] (judged "(defn f [x] (ProcessBuilder. x))")) "ProcessBuilder(List) and (String[]) — Object fits neither")))
 
 (deftest what-a-corpus-never-learned-from-taught
-  ;; clojure-mcp, blind: boxed 79/79, reflection P 0.92 R 0.75 before these.
   (testing "one method at the arity resolves whatever the argument — the theory that (double x) reflects against a Double parameter was wrong, and the dump said so"
     (is (= [] (judged "(defn f [^Builder b x] (.temperature b (double x)))")))
     (is (= [] (judged "(defn f [^Builder b ^String m] (.modelName b m))"))))
@@ -181,9 +166,6 @@
     (is (= [] (judged "(defn f [^java.io.Reader r] (.read r (char-array 1024)))")))))
 
 (deftest a-simple-name-with-two-classes-behind-it-is-the-file-s-import
-  ;; a production service imports java.util.Date and java.sql.Date; keyed by simple name the
-  ;; dump kept sql's two constructors and (Date. (+ …)) resolved where the
-  ;; compiler, seeing util's Date(long) and Date(String), reflected.
   (let [two {:classes {"java.util.Date" {:supers ["Object"] :ctors [{:params ["long"]} {:params ["String"]}] :methods {}}
                        "java.sql.Date" {:supers ["Object"] :ctors [{:params ["long"]}] :methods {}}}
              :by-simple {"Date" ["java.util.Date" "java.sql.Date"]}}]
@@ -215,7 +197,6 @@
   (is (= [:reflection] (kinds "(defn f [{:keys [s]}] (.length s))"))))
 
 (deftest what-a-numeric-library-taught-blind
-  ;; first score, before reading: boxed P 0.82 R 0.99, reflection P 0.71 R 0.88
   (testing "each arity of a multi-arity fn carries its own hints"
     (is (= [] (kinds "(defn f ([t] (f t 1)) ([^double t ^double p] (* (- 1 t) p)))")))
     (is (= [:boxed-math :boxed-math] (kinds "(defn f ([t] (f t 1)) ([t p] (* (- 1 t) p)))"))))
@@ -230,8 +211,6 @@
         "the multiply boxes, abs reflects on its Number, the subtract boxes over abs's Object")))
 
 (deftest a-double-operand-makes-the-result-double-even-beside-an-unknown
-  ;; Numbers.divide(Object, double) coerces and returns double: the divide is
-  ;; warned, and everything over its result is primitive — a numeric library's color.clj
   (is (= [[:boxed-math 21]] (at "(defn f [l] (let [n (/ l 100.0)] (- 1 (* 2 n))))"))
       "only the divide boxes; n is a double, (* 2 n) and (- 1 …) are primitive"))
 
@@ -245,7 +224,6 @@
       "a double fits abs(float) too; the compiler takes abs(double) exactly, and the answer is a primitive double"))
 
 (deftest the-js-host-warns-on-an-untyped-target-with-a-non-extern-property
-  ;; cljs.analyzer/analyze-dot + shadow-cljs :infer-externs :auto; a ClojureScript app before its fixes, 42/50
   (let [js (fn [src] (mapv :kind (remove #(= :reflection-unwarned (:kind %)) (tf/predictions src "x.cljs" :js {:externs #{"beginPath" "length"}}))))]
     (is (= [:uninferred] (js "(defn f [d] (.-sameNs d))")))
     (is (= [] (js "(defn f [ctx] (.beginPath ctx))")) "an extern property is silent whatever the target")
@@ -266,8 +244,6 @@
         "arities that disagree are both returned — a conflict is a fact")))
 
 (deftest an-unqualified-head-is-this-namespace-s-var-before-core-s
-  ;; a static-analysis plugin's junit.clj: (.newDocumentBuilder (safe-factory)) on a
-  ;; ^DocumentBuilderFactory defn- in the same file, without kondo
   (is (= [] (kinds* "(ns s)\n(defn f [] (.newDocumentBuilder (safe-factory)))" {:var-tags {"s/safe-factory" "javax.xml.parsers.DocumentBuilderFactory"}})))
   (is (= [:reflection] (kinds "(ns s)\n(defn f [] (.newDocumentBuilder (safe-factory)))"))))
 

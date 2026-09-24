@@ -1,5 +1,11 @@
-{:tasks
- {:requires ([babashka.fs :as fs] [clojure.string])
+;; Maintainer tasks. sift itself comes from deps.edn (:local/root), so bb runs
+;; the same dependency versions the JVM suite does; script/ holds the task code.
+{:paths ["script"]
+ :deps  {net.typemark/sift {:local/root "."}}
+ ;; `bbin install io.github.typmk/sift` reads this to install the `sift` command
+ :bbin/bin {sift {:main-opts ["-m" "net.typemark.sift.cli"]}}
+ :tasks
+ {:requires ([babashka.fs :as fs] [clojure.string :as str])
 
   test
   {:doc  "The gate: the unit suite on the JVM."
@@ -15,8 +21,9 @@
                (when (or (empty? jvm) (not= jvm node))
                  (println "JVM and node disagree: diff target/jvm.edn target/node.edn")
                  (System/exit 1))
-               (println (count (clojure.string/split-lines jvm)) "rows, identical on the JVM and node")))}
+               (println (count (str/split-lines jvm)) "rows, identical on the JVM and node")))}
 
   validate
-  {:doc  "The measurement: typeflow against every corpus oracle in corpora/, and the evidence ledger."
-   :task (apply shell "bb dev/validate.clj" *command-line-args*)}}}
+  {:doc      "The measurement: typeflow against every corpus oracle in corpora/, and the evidence ledger. [--residue] [corpus …]"
+   :requires ([validate])
+   :task     (apply validate/-main *command-line-args*)}}}

@@ -20,7 +20,11 @@ the evidence it rests on.
 
 ## Install
 
-**CLI** (needs [babashka](https://babashka.org)):
+**CLI** (needs [babashka](https://babashka.org)), with [bbin](https://github.com/babashka/bbin):
+
+    bbin install io.github.typmk/sift
+
+or from a clone:
 
     git clone https://github.com/typmk/sift
     ln -s "$PWD/sift/bin/sift" ~/.local/bin/sift
@@ -73,7 +77,14 @@ sift runs on source text alone. Three inputs make it see more:
 |---|---|---|
 | clj-kondo analysis | `clj-kondo --lint src --config '{:analysis {:arglists true :locals true :keywords true} :output {:format :json}}' > analysis.json` · CLI `--analysis analysis.json` | Symbol resolution (`(c/atom …)` is `clojure.core/atom`; a parameter named `swap!` is not the mutator), docstring rules, and banned terms |
 | Vocabulary | an EDN file · CLI `--vocabulary vocab.edn` · `:vocabulary` on `analyze` | Your project's own terms: `{:banned {:dimension ":facet"} :shared-ns #{:taxon}}`. `:banned` keywords are reported with what to use instead. `:shared-ns` names attribute namespaces that no tenant scopes, so queries over them aren't flagged |
-| Compiler oracle | in *your* project: `sift oracle --out oracle src` (runs your code in a JVM with `clojure -M`, on your classpath) · then `sift lint --oracle oracle src` | Each `typeflow` prediction is judged against the compiler's own warnings, with the compiler's class table behind it. Without an oracle, typeflow findings say `[unjudged]` |
+| Compiler oracle | in *your* project: `sift oracle --out oracle src`, or the alias below as `clojure -M:sift/oracle --out oracle src` · then `sift lint --oracle oracle src` | Each `typeflow` prediction is judged against the compiler's own warnings, with the compiler's class table behind it. Without an oracle, typeflow findings say `[unjudged]` |
+
+The oracle loads your project in a JVM on your own classpath. It is its own
+library under `oracle/` with no dependencies, so it adds one namespace and nothing
+else. As a `deps.edn` alias:
+
+    :sift/oracle {:extra-deps {io.github.typmk/sift {:git/tag "v0.1.2" :git/sha "…" :deps/root "oracle"}}
+                  :main-opts  ["-m" "net.typemark.sift.oracle"]}
 
 ## What it finds
 
@@ -163,8 +174,15 @@ machine. To reproduce these numbers, check each project out under
 
 ## Development
 
-`bin/sift` is the one command; `tools/oracle.clj` is the half of `sift oracle` that
-has to run inside the target project's JVM. Maintainer tasks are in `bb.edn`:
+    src/                  the library; src/net/typemark/sift/cli.clj is the CLI (babashka only)
+    bin/sift              runs the CLI from a clone
+    oracle/               the JVM half of `sift oracle`: a dependency-free library (:deps/root)
+    script/               maintainer task code, on bb.edn's :paths
+    corpora/              the corpora `bb validate` scores
+    test/  test-cljs/     the suite, and the JVM/node parity check
+
+`bb.edn` takes sift itself from `deps.edn`, so the tasks run the same dependency
+versions as the JVM suite:
 
     bb test        # the gate: the unit suite
     bb parity      # every corpus file on the JVM and on node; the outputs must be identical

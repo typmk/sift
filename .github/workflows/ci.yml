@@ -57,6 +57,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # bb.edn takes sift from deps.edn, and bb resolves that with Java
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
       - uses: DeLaGuardo/setup-clojure@13.4
         with:
           bb: latest

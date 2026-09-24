@@ -284,14 +284,14 @@
   (when (string? tag) (last (str/split tag #"\."))))
 
 (def ^:dynamic *classes*
-  "bin/oracle's tags.edn: {:classes {full-name {:supers :fields :ctors :methods}}
+  "`sift oracle`'s tags.edn: {:classes {full-name {:supers :fields :ctors :methods}}
   :by-simple {simple [full …]}}. nil is none, and then a resolved call is
   \"host\": known, unnamed."
   nil)
 
 (def ^:dynamic *externs*
   "The property names Closure's default externs already declare — a set,
-  from bin/oracle-js. shadow-cljs's :infer-externs :auto warns for a member
+  from `sift oracle --js`. shadow-cljs's :infer-externs :auto warns for a member
   access on an untyped target ONLY when the property is not among them:
   (.beginPath ctx) on an untyped ctx is silent because every browser extern
   has beginPath, and (.-sameNs d) is not. Measured on a ClojureScript app before its warnings were fixed:
@@ -343,7 +343,7 @@
 
 (defn- allowed-receiver?
   "Is this property on the host's allow-list, so its compiler stays silent?
-  Only :externs today (bin/oracle-js's dump, read into *externs*). A host
+  Only :externs today (`sift oracle --js`'s dump, read into *externs*). A host
   that names no allow-list allows nothing."
   [host prop]
   (and (= :externs (get-in hosts [host :unknown-receiver :allowlist]))
@@ -1037,7 +1037,7 @@
 
 (defn var-tags
   "RETIRED 2026-08-28: the oracle's :vars carries the corpus's own return
-  hints and ^:const literals (bin/oracle requires every namespace), and a
+  hints and ^:const literals (the oracle requires every namespace), and a
   second reading of the same trees disagreed with it exactly where hints
   were spelled unusually. Kept as an empty map so a caller written against
   the old shape still merges."
@@ -1156,7 +1156,7 @@
   predictions — they need the same env. catch-all-swallow and
   mutable-escape are shape questions and stay in host.cljc."
   {:typeflow/boxed-math   {:category :performance :evidence :compiler
-                           :note "seven corpora agree with the compiler exactly, 3,351 notes; blind first scores clojure-mcp 79/79, a held-out corpus 38/39, a numeric library P 0.82 R 0.99 — bin/validate"}
+                           :note "seven corpora agree with the compiler exactly, 3,351 notes; blind first scores clojure-mcp 79/79, a held-out corpus 38/39, a numeric library P 0.82 R 0.99 — bb validate"}
    :typeflow/reflection   {:category :performance :evidence :compiler
                            :note "285 notes, all matched; blind first scores clojure-mcp P 0.92 R 0.75, a held-out corpus P 0.85, a numeric library P 0.71 R 0.88"}
    :typeflow/uninferred   {:category :performance :evidence :compiler

@@ -1,0 +1,22 @@
+{:tasks
+ {:requires ([babashka.fs :as fs] [clojure.string])
+
+  test
+  {:doc  "The gate: the unit suite on the JVM."
+   :task (clojure "-M:test")}
+
+  parity
+  {:doc  "Every test-corpus file through sift/analyze on the JVM and on node; the two must be identical."
+   :task (do (fs/create-dirs "target")
+             (clojure {:out "target/jvm.edn"} "-M:parity")
+             (clojure "-M:cljs")
+             (shell {:out "target/node.edn"} "node target/parity.js")
+             (let [jvm (slurp "target/jvm.edn") node (slurp "target/node.edn")]
+               (when (or (empty? jvm) (not= jvm node))
+                 (println "JVM and node disagree: diff target/jvm.edn target/node.edn")
+                 (System/exit 1))
+               (println (count (clojure.string/split-lines jvm)) "rows, identical on the JVM and node")))}
+
+  validate
+  {:doc  "The measurement: typeflow against every corpus oracle in corpora/, and the evidence ledger."
+   :task (apply shell "bb dev/validate.clj" *command-line-args*)}}}

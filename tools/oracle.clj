@@ -1,14 +1,14 @@
-#!/usr/bin/env clojure -M
 ;; Everything typeflow needs from the JVM, in one run where the project
-;; loads — replaces bin/assay-notes and bin/var-tags:
+;; loads:
 ;;
-;;   cd <project> && clojure -M path/to/sift/bin/oracle [--out DIR] <src-root>…
+;;   cd <project> && sift oracle [--out DIR] <src-root>…
+;;   (which runs: clojure -M path/to/sift/tools/oracle.clj …)
 ;;
 ;; writes DIR (default oracle/):
 ;;   notes.edn     one #:assay.note{…} per line — the compiler's reflection and
 ;;                 boxed-math warnings while every namespace under the roots
 ;;                 loaded, as data. The line format is assay's, which
-;;                 bin/validate reads; the capture itself is below and needs
+;;                 bb validate reads; the capture itself is below and needs
 ;;                 nothing but Clojure
 ;;   loaded.edn    the files whose namespace loaded, as "dir/file.clj" tails —
 ;;                 a file with no note is either clean or never compiled,

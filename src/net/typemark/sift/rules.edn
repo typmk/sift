@@ -26,8 +26,8 @@
 ;; ORDER DOES NOT MATTER: the first rule that matches a form wins, and no
 ;; two rules can match one form — every pattern's head is a literal symbol
 ;; and no head appears in two rules. data_rules_order_test pins that;
-;; bin/rule-order measures it (20 shuffled orders, four corpora, zero forms
-;; whose finding moved, 2026-09-02). A rule whose head another rule already
+;; measured before it was pinned: 20 shuffled orders, four corpora, zero
+;; forms whose finding moved (2026-09-02). A rule whose head another rule already
 ;; carries needs a :not or a guard, not a position.
 ;;
 ;; NOT HERE: what splint (noahtheduke/splint, in the estate's `lint:style`)

@@ -3,8 +3,8 @@
   with no confluence guarantee unless the rules cannot overlap. They cannot:
   every :match / :either pattern starts with a literal symbol, and no head
   is claimed by two rules. That is the property that makes the file's order
-  a non-decision, and bin/rule-order is the measurement behind it — 20
-  shuffled orders over four corpora, zero forms whose finding moved."
+  a non-decision. Measured before this test pinned it: 20 shuffled orders
+  over four corpora, zero forms whose finding moved."
   (:require [clojure.test :refer [deftest is testing]]
             [net.typemark.sift.data :as data]))
 

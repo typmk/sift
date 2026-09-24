@@ -15,8 +15,8 @@ the evidence it rests on.
   resolve symbols itself; it reads [clj-kondo](https://github.com/clj-kondo/clj-kondo)'s
   analysis output when you give it one.
 - **Predictions are checked against the compiler.** `typeflow` predicts where the
-  JVM compiler will fall back to reflection or boxed math. `bin/oracle` records what
-  the compiler actually did, and `bin/validate` scores the prediction against it.
+  JVM compiler will fall back to reflection or boxed math. `sift oracle` records what
+  the compiler actually did, and each prediction is judged against it.
 
 ## Install
 
@@ -73,7 +73,7 @@ sift runs on source text alone. Three inputs make it see more:
 |---|---|---|
 | clj-kondo analysis | `clj-kondo --lint src --config '{:analysis {:arglists true :locals true :keywords true} :output {:format :json}}' > analysis.json` · CLI `--analysis analysis.json` | Symbol resolution (`(c/atom …)` is `clojure.core/atom`; a parameter named `swap!` is not the mutator), docstring rules, and banned terms |
 | Vocabulary | an EDN file · CLI `--vocabulary vocab.edn` · `:vocabulary` on `analyze` | Your project's own terms: `{:banned {:dimension ":facet"} :shared-ns #{:taxon}}`. `:banned` keywords are reported with what to use instead. `:shared-ns` names attribute namespaces that no tenant scopes, so queries over them aren't flagged |
-| Compiler oracle | in *your* project: `clojure -M /path/to/sift/bin/oracle --out oracle src` · CLI `--oracle oracle` | Each `typeflow` prediction is judged against the compiler's own warnings, with the compiler's class table behind it. Without an oracle, typeflow findings say `[unjudged]` |
+| Compiler oracle | in *your* project: `sift oracle --out oracle src` (runs your code in a JVM with `clojure -M`, on your classpath) · then `sift lint --oracle oracle src` | Each `typeflow` prediction is judged against the compiler's own warnings, with the compiler's class table behind it. Without an oracle, typeflow findings say `[unjudged]` |
 
 ## What it finds
 
@@ -104,7 +104,7 @@ Every rule carries the evidence it rests on, and every finding prints it in brac
 
 | Rung | Meaning | Rules |
 |---|---|---|
-| `compiler` | predictions scored against the host compiler's own warnings (`bin/validate`) | 3 |
+| `compiler` | predictions scored against the host compiler's own warnings (`bb validate`) | 3 |
 | `parity` | measured equal to an independent implementation | 1 |
 | `corpus` | a file under `test/…/corpus/flag` that must fire and one under `clear` that must not | 42 |
 | `read` | every hit on real code was read at its line by a person | 7 |
@@ -127,15 +127,15 @@ signatures. Where the type (the tag) runs out, the compiler takes the slow path
 and warns. `typeflow` predicts those sites from source. It applies the compiler's
 own resolution rules (`Compiler.paramArgTypeMatch`, one method at an arity taken
 without looking at the arguments, `getAsMethodOfPublicBase`) to the class table
-`bin/oracle` dumps. What `concepts.edn` and `hosts.edn` state is only what the
+`sift oracle` dumps. What `concepts.edn` and `hosts.edn` state is only what the
 compiler knows without reading a var, and the dump supplies the rest.
 
-`bin/validate` scores every corpus in `corpora/`. A corpus's role only moves one
+`bb validate` scores every corpus in `corpora/`. A corpus's role only moves one
 way. **Blind** means its first score was recorded before any of its code was read;
 that score is the forecast. **In-sample** means rules were learned from it, so its
 score is a fit.
 
-Measured with `bin/validate` on 2026-09-24:
+Measured with `bb validate` on 2026-09-24:
 
 | Corpus | Role | Boxed math | Reflection |
 |---|---|---|---|
@@ -152,35 +152,26 @@ P 0.92 R 0.75. Earlier dated records, whose oracles are private or stale:
 |---|---|---|
 | a numeric library (22 files, 3,080 notes) | boxed P 0.82 R 0.99 · reflection P 0.71 R 0.88 | boxed 3,055/3,055 · reflection 25/25 |
 | sonar-clojure on its plugin classpath (201 sites) | reflection P 1.00 R 0.995 | stale since; re-dump before believing it |
-| a ClojureScript viewer (42 Closure warnings) | P 0.16 R 1.00 | P 0.84 R 1.00, from Closure's externs (`bin/oracle-js`) |
+| a ClojureScript viewer (42 Closure warnings) | P 0.16 R 1.00 | P 0.84 R 1.00, from Closure's externs (`sift oracle --js`) |
 
-An oracle dump goes stale as its source moves. `bin/validate` labels a stale one
+An oracle dump goes stale as its source moves. `bb validate` labels a stale one
 STALE, and prints SKIPPED for a corpus whose source or oracle is not on the
 machine. To reproduce these numbers, check each project out under
-`~/.cache/sift/corpora/<name>` and run `bin/oracle` in it with
+`~/.cache/sift/corpora/<name>` and run `sift oracle` in it with
 `--out ~/.cache/sift/oracles/<name>`. To add a corpus, do the same and add a
 `corpora/<name>.edn` with `:role :blind`. Keep its first score.
 
-## Scripts
-
-| Script | Runs on | Does |
-|---|---|---|
-| `bin/sift` | babashka | the CLI above |
-| `bin/oracle` | the target project's JVM (`clojure -M`) | writes `notes.edn` (compiler warnings), `loaded.edn`, `tags.edn` (var tags and class table), and `analysis.json` if clj-kondo is on PATH |
-| `bin/oracle-js` | babashka | the property names Closure's default externs declare, for the JS host |
-| `bin/validate` | babashka | typeflow against every corpus oracle, plus the evidence ledger's rung counts |
-| `bin/rule-order` | babashka | checks that `rules.edn`'s order is not load-bearing |
-
 ## Development
 
-    clojure -M:test                                        # the gate
-    clojure -M:parity > jvm.edn                            # every corpus file, JVM
-    clojure -M:cljs && node target/parity.js > node.edn    # the same, on node
-    diff jvm.edn node.edn                                  # must be empty
-    bin/validate                                           # the measurement (needs oracles)
+`bin/sift` is the one command; `tools/oracle.clj` is the half of `sift oracle` that
+has to run inside the target project's JVM. Maintainer tasks are in `bb.edn`:
 
-CI runs the first four, plus the CLI under babashka against the flag and clear corpora,
-per category.
+    bb test        # the gate: the unit suite
+    bb parity      # every corpus file on the JVM and on node; the outputs must be identical
+    bb validate    # the measurement: typeflow against every corpus oracle (needs the oracles)
+
+CI runs `test` and `parity`, plus the CLI under babashka against the flag and clear
+corpora, per category.
 
 Two rules for anyone editing this:
 

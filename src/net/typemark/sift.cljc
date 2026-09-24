@@ -234,10 +234,10 @@
                  attribute namespaces no tenant scopes
      :tenanted?  (sift/tenanted? texts) over the corpus; default true.
                  false switches unscoped-tenant-query off as vacuous
-     :var-tags   {ns/name tag} — bin/oracle's :vars plus sift/var-tags
-     :classes    bin/oracle's :classes — the host's own method, constructor
+     :var-tags   {ns/name tag} — `sift oracle`'s :vars plus sift/var-tags
+     :classes    `sift oracle`'s :classes — the host's own method, constructor
                  and field table; typeflow judges overloads with it
-     :loaded     bin/oracle's loaded.edn — files the compiler compiled; a
+     :loaded     `sift oracle`'s loaded.edn — files the compiler compiled; a
                  typeflow finding in any other file says :unjudged}
 
   -> {:ok? true
@@ -289,10 +289,10 @@
                         (remove #(contains? #{:js-prop-on-own-object :reflection-unwarned} (:rule %)))
                         (map #(normalize :typeflow :performance
                                          (assoc % :instruction "Hint the receiver or operands (^String s, ^long n), or cast (long x); the host compiler takes the slow path where the tag runs out.")))
-                        ;; without bin/oracle's table the walker still runs, but what it
+                        ;; without the oracle's table the walker still runs, but what it
                         ;; says was not judged the way the :compiler rung means: say so
                         (map #(cond (and (nil? classes) jvm?)
-                                    (assoc % :evidence :unjudged :note "no oracle; run sift/bin/oracle in the project")
+                                    (assoc % :evidence :unjudged :note "no oracle; run `sift oracle` in the project")
                                     ;; the oracle exists but the compiler never loaded THIS file —
                                     ;; a plugin's 14 files that need its host's classpath — so
                                     ;; nothing judged these; 200 of its 259 findings were this

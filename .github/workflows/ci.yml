@@ -1,4 +1,4 @@
-# The suite is the gate; bin/validate is the measurement and needs oracle
+# The suite is the gate; bb validate is the measurement and needs oracle
 # dumps that live outside the repo, so it does not run here.
 name: ci
 on: [push, pull_request]

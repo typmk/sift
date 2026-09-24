@@ -76,7 +76,7 @@
   guard can ask what a bound form IS, not only what it looks like."
   nil)
 
-(def ^:dynamic *classes* "bin/oracle's table, for :tag guards' supertypes." nil)
+(def ^:dynamic *classes* "The oracle's class table, for :tag guards' supertypes." nil)
 
 (def ^:dynamic *imports* "{simple full} from the file's ns :import." {})
 
@@ -231,7 +231,7 @@
 (defn- try-rules
   "The first rule that matches wins — one form, one finding. Which rule is
   first does not matter: no two rules share a pattern head, so at most one
-  can match (data_rules_order_test, bin/rule-order). Each rule is asked only
+  can match (data_rules_order_test). Each rule is asked only
   where its :scope says to look."
   [file zloc form]
   (let [form (resolve-head form)

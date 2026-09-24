@@ -1,11 +1,10 @@
-#!/usr/bin/env bb
 ;; The scorecard: everything sift claims, re-measured in one run.
 ;;
-;;   bin/validate            all corpora in corpora/*.edn
-;;   bin/validate sift cherry  named ones
+;;   bb validate               all corpora in corpora/*.edn
+;;   bb validate sift cherry   named ones
 ;;
-;; For each corpus with an oracle directory (bin/oracle's output for the JVM,
-;; a shadow-cljs release log plus bin/oracle-js's externs.edn for JS — kept
+;; For each corpus with an oracle directory (`sift oracle`'s output for the JVM,
+;; a shadow-cljs release log plus `sift oracle --js`'s externs.edn for JS — kept
 ;; at :oracle, outside the repo, because notes name private files): typeflow's
 ;; predictions against the compiler's warnings, precision and recall, with
 ;; the corpus's :role beside the number — an :in-sample corpus is one the
@@ -99,12 +98,12 @@
           :let [root (expand root) oracle (expand oracle)]]
     (if-not (and (or (fs/exists? (str oracle "/notes.edn")) (fs/exists? (str oracle "/closure.log"))) (fs/exists? root))
       (printf "%-12s %-10s SKIPPED — %s%n" name (clojure.core/name role)
-              (if (fs/exists? root) (str "no oracle at " oracle " (run bin/oracle in the project)") (str "no source at " root)))
+              (if (fs/exists? root) (str "no oracle at " oracle " (run sift oracle in the project)") (str "no source at " root)))
       ;; :kinds in the manifest restricts what this oracle can judge — a
       ;; classpath run that warns on reflection but cannot on boxing
       (do
        (when-let [d (staleness root oracle)]
-         (printf "%-12s %-10s STALE — the oracle is %d day(s) behind this source; re-run bin/oracle before believing the score%n"
+         (printf "%-12s %-10s STALE — the oracle is %d day(s) behind this source; re-run sift oracle before believing the score%n"
                  name (clojure.core/name role) d))
        (doseq [kind (or kinds (if (fs/exists? (str oracle "/closure.log")) ["uninferred"] ["boxed-math" "reflection"]))]
         (let [{:keys [oracle predicted tp fp fn p r fns fps]} (judge root oracle kind)]

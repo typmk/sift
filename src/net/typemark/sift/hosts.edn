@@ -22,7 +22,7 @@
 ;; The six below carried the last of typeflow's host branches. The flow was
 ;; already host-neutral -- 20 mentions of a host in 1,125 lines, of which 8
 ;; were real branches -- and each of those 8 is now one of these keys, so a
-;; dialect is a row here and nowhere else. bin/validate is the proof: every
+;; dialect is a row here and nowhere else. bb validate is the proof: every
 ;; corpus scored identically before and after.
 ;;
 ;;   :files        the extensions that compile for this host. host-of reads
@@ -136,14 +136,14 @@
        ;; cljs.analyzer/analyze-dot warns :infer-warning when the target's
        ;; inferred tag is nil or any; shadow-cljs's :infer-externs :auto then
        ;; keeps only the properties Closure's default externs do not already
-       ;; declare (typeflow/*externs*, from bin/oracle-js). The 648-vs-0 that
+       ;; declare (typeflow/*externs*, from `sift oracle --js`). The 648-vs-0 that
        ;; switched this host off was an EMPTY oracle — a code-graph tool's source was
        ;; already clean — judging a model; a ClojureScript app before its fixes has 42.
        :warns #{:uninferred}
        :files #{".cljs"}
        :feature :cljs
        :tag-keywords #{:js}
-       ;; the externs allow-list is bin/oracle-js's; without it every property
+       ;; the externs allow-list is `sift oracle --js`'s; without it every property
        ;; on an untyped receiver reads as uninferred and Closure would not warn
        :unknown-receiver {:finding :uninferred :allowlist :externs}
        :implicit-calls {}

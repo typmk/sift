@@ -73,7 +73,7 @@
   (is (= [:uninferred] (mapv :kind (remove #(= :reflection-unwarned (:kind %)) (tf/predictions "(defn f [x] (.foo x))" "x.cljs" :js))))))
 
 (def classes
-  "A slice of what bin/oracle dumps, enough for the assertions below —
+  "A slice of what `sift oracle` dumps, enough for the assertions below —
   supers, constructors and methods with parameter types."
   {"OutputStreamWriter" {:supers ["Writer" "Object"] :ctors [{:params ["OutputStream"]} {:params ["OutputStream" "String"]} {:params ["OutputStream" "Charset"]}]
                          :methods {"write" [{:params ["String"] :returns "void"} {:params ["char[]"] :returns "void"} {:params ["int"] :returns "void"}

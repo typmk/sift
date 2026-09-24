@@ -5,11 +5,19 @@
 ;;   sift lint <path>…         every finding sift has for each file
 ;;                             (sift/analyze)
 ;;   sift complexity <path>…   units over the cognitive threshold (default 15)
+;;   sift oracle [--out DIR] <src-root>…
+;;                             run in YOUR project: loads its namespaces in a JVM
+;;                             (clojure -M, the project's classpath) and writes
+;;                             what the compiler said to DIR (default oracle/),
+;;                             which --oracle then reads
+;;   sift oracle --js [--out DIR] [closure-compiler.jar]
+;;                             the JS host's oracle: the property names Closure's
+;;                             default externs declare, as DIR/externs.edn
 ;;   --category C              lint only: refactor | complexity | performance |
 ;;                             security | correctness | documentation
 ;;   --edn                     print findings as EDN
 ;;   --threshold N             complexity only
-;;   --oracle DIR              bin/oracle's output: typeflow is judged against
+;;   --oracle DIR              `sift oracle`'s output: typeflow is judged against
 ;;                             the compiler, and DIR/analysis.json is used as
 ;;                             --analysis when present
 ;;   --analysis FILE           clj-kondo analysis JSON (see the README for the
@@ -23,8 +31,10 @@
 ;;
 ;; Exit 1 when anything is reported, 0 when clean, 2 on usage. Reports; the
 ;; gate is the caller's — sift never writes.
-(require '[babashka.classpath :as cp] '[babashka.fs :as fs] '[clojure.string :as str])
-(cp/add-classpath (str (fs/parent (fs/parent (fs/real-path *file*))) "/src"))
+(require '[babashka.classpath :as cp] '[babashka.fs :as fs] '[babashka.process :as process]
+         '[clojure.java.io :as io] '[clojure.string :as str])
+(def root (str (fs/parent (fs/parent (fs/real-path *file*)))))
+(cp/add-classpath (str root "/src"))
 (require '[net.typemark.sift :as sift]
          '[net.typemark.sift.resolve :as resolve]
          '[net.typemark.sift.baseline :as baseline]
@@ -46,8 +56,46 @@
 
 (defn- usage []
   (binding [*out* *err*]
-    (println "usage: sift (lint | complexity) [--edn] [--category C] [--threshold N] [--analysis A | --oracle DIR] [--vocabulary V] [--baseline B | --write-baseline B] <path> ..."))
+    (println "usage: sift (lint | complexity) [--edn] [--category C] [--threshold N] [--analysis A | --oracle DIR] [--vocabulary V] [--baseline B | --write-baseline B] <path> ...  |  sift oracle [--js] [--out DIR] ..."))
   (System/exit 2))
+
+(defn- externs!
+  "The property names in Closure's default externs, as a set in
+  `out`/externs.edn. Measured on a ClojureScript app before its 42
+  :infer-warnings were fixed: P 0.84 R 1.00. The 8 false positives were npm
+  property names shadow-cljs knew from sources this does not read; adding
+  every property name in those sources removed the 8 and lost 14 true
+  positives, so that is not the rule."
+  [out jar]
+  (let [jar (or jar
+                (->> (fs/glob (str (System/getProperty "user.home") "/.m2/repository/com/google/javascript/closure-compiler") "**/closure-compiler-v*.jar")
+                     (map str) (remove #(str/includes? % "sources")) sort last))
+        _ (when-not jar (binding [*out* *err*] (println "no closure-compiler jar found; pass one")) (System/exit 2))
+        inner (str (fs/create-temp-dir) "/externs.zip")]
+    (with-open [zip (java.util.zip.ZipFile. (str jar))
+                in (.getInputStream zip (.getEntry zip "externs.zip"))
+                o (io/output-stream inner)]
+      (io/copy in o))
+    (with-open [z (java.util.zip.ZipFile. inner)]
+      (let [names (into (sorted-set)
+                        (for [e (enumeration-seq (.entries z)) :when (str/ends-with? (.getName e) ".js")
+                              [_ p] (re-seq #"\.([A-Za-z_$][A-Za-z0-9_$]*)" (slurp (.getInputStream z e)))]
+                          p))]
+        (fs/create-dirs out)
+        (spit (str out "/externs.edn") (pr-str names))
+        (binding [*out* *err*] (println (count names) "property names from" (fs/file-name jar) "->" (str out "/externs.edn")))))))
+
+(when (= "oracle" (first *command-line-args*))
+  (let [args (vec (rest *command-line-args*))]
+    (if (some #{"--js"} args)
+      (let [out (or (some->> args (drop-while #(not= "--out" %)) second) "oracle")
+            jar (first (remove (into #{"--js" "--out"} [out]) args))]
+        (externs! out jar)
+        (System/exit 0))
+      ;; the JVM half runs on the project's own classpath, which is the point:
+      ;; the compiler has to load THIS project to say where it reflects
+      (System/exit (:exit @(process/process (into ["clojure" "-M" (str root "/tools/oracle.clj")] args)
+                                            {:inherit true}))))))
 
 (let [args      *command-line-args*
       cmd       (first args)
@@ -62,7 +110,7 @@
       resolution (when analysis (resolve/index (slurp analysis)))
       ;; docstring rules and the banned terms read the same analysis, once
       prose     (when analysis (sift/prose-findings (slurp analysis) vocabulary))
-      ;; bin/oracle's directory: the JVM's var tags and class table, so
+      ;; `sift oracle`'s directory: the JVM's var tags and class table, so
       ;; typeflow's findings are judged and not :unjudged
       dump      (when odir (let [f (str odir "/tags.edn")] (when (fs/exists? f) (edn/read-string (slurp f)))))
       loaded    (when odir (let [f (str odir "/loaded.edn")] (when (fs/exists? f) (set (edn/read-string (slurp f))))))

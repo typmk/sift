@@ -24,7 +24,7 @@
   (:require [clojure.string :as str]
             [net.typemark.sift.zip :refer [children peel list-op op-name head-name
                                            collect inside-defn? pos-of sexpr
-                                           binder-vec vec-pairs token-name]]
+                                           token-name]]
             [rewrite-clj.zip :as z]))
 
 (def rules

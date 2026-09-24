@@ -71,3 +71,13 @@ jobs:
           for k in refactor security; do
             if bin/sift lint --category $k $c/flag > /dev/null; then echo "flag corpus reported no $k finding"; exit 1; fi
           done
+
+  # sift is a linter; its own source passes one
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeLaGuardo/setup-clojure@13.4
+        with:
+          clj-kondo: latest
+      - run: clj-kondo --lint src script oracle/src bin/sift --fail-level warning

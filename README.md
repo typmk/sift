@@ -138,8 +138,8 @@ signatures. Where the type (the tag) runs out, the compiler takes the slow path
 and warns. `typeflow` predicts those sites from source. It applies the compiler's
 own resolution rules (`Compiler.paramArgTypeMatch`, one method at an arity taken
 without looking at the arguments, `getAsMethodOfPublicBase`) to the class table
-`sift oracle` dumps. What `concepts.edn` and `hosts.edn` state is only what the
-compiler knows without reading a var, and the dump supplies the rest.
+`sift oracle` dumps. `hosts.edn` states only what the compiler knows without
+reading a var, and the dump supplies the rest.
 
 `bb validate` scores every corpus in `corpora/`. A corpus's role only moves one
 way. **Blind** means its first score was recorded before any of its code was read;
@@ -188,8 +188,8 @@ versions as the JVM suite:
     bb parity      # every corpus file on the JVM and on node; the outputs must be identical
     bb validate    # the measurement: typeflow against every corpus oracle (needs the oracles)
 
-CI runs `test` and `parity`, plus the CLI under babashka against the flag and clear
-corpora, per category.
+CI runs `test` and `parity`, the CLI under babashka against the flag and clear
+corpora per category, and clj-kondo over the source, which must report nothing.
 
 Two rules for anyone editing this:
 

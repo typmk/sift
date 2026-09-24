@@ -83,10 +83,11 @@
 
 (defn- findings*
   [text file]
-  ;; `edn*`, not `of-string`: `of-string` moves to the FIRST form, and a
+  ;; `of-node*` (edn* before rewrite-clj 1.1.45), not `of-string`:
+  ;; `of-string` moves to the FIRST form, and a
   ;; walk from there sees only the ns form. Measured: every corpus file
   ;; read as clean.
-  (let [zloc (try (z/edn* (parser/parse-string-all text))
+  (let [zloc (try (z/of-node* (parser/parse-string-all text))
                   (catch #?(:clj Exception :cljs :default) _ nil))]
     (if zloc
       (findings-in zloc file (typeflow/findings text file))

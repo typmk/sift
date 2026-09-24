@@ -16,8 +16,8 @@
   success-typing claim about a failure, never `this program is well-typed`.
   Typed Clojure's runtime-trace inference and Typed Racket's occurrence
   typing are the ancestors; the host table in hosts.edn is what makes a
-  dialect a row rather than a namespace, and concepts.edn is the lattice
-  above the host so a literal `{}` and a hint `^IPersistentMap` meet.
+  dialect a row rather than a namespace, and its :concept-classes let a
+  literal `{}` (the concept :map) and a hint `^IPersistentMap` meet.
 
   Intra-definition, forward, one pass: params (hinted or Object), literals,
   `let`/`loop` bindings, casts, core fns the host table knows, and
@@ -32,19 +32,14 @@
   Measured against assay's notes over this library's own source before it
   was believed — the numbers are in the README, and they are the claim."
   (:require [clojure.string :as str]
-            [net.typemark.sift.zip :refer [children peel list-op op-name head-name
+            [net.typemark.sift.zip :refer [children peel head-name
                                            collect pos-of sexpr token-name
-                                           binder-vec vec-pairs]]
+                                           vec-pairs]]
             #?(:clj  [net.typemark.sift.data-rules :refer [load-edn]]
                :cljs [net.typemark.sift.data-rules :refer-macros [load-edn]])
-            [rewrite-clj.node :as n]
             [rewrite-clj.zip :as z]))
 
 (def hosts (load-edn "hosts.edn"))
-(def concepts (load-edn "concepts.edn"))
-
-(def ^:private jvm-carrier->concept
-  (into {} (for [{:keys [id jvm]} (:concepts concepts) :when jvm] [jvm id])))
 
 (defn host-of
   "Which host a file compiles for, by the :files of each row in hosts.edn;
@@ -62,8 +57,8 @@
 
 ;; ---- tags ---------------------------------------------------------------
 ;;
-;; A tag is a string (a host class or primitive), a keyword (a concept from
-;; concepts.edn — :map, :vector — which is known but not primitive), or nil
+;; A tag is a string (a host class or primitive), a keyword (a concept —
+;; :map, :vector — which is known but not primitive), or nil
 ;; for Object/unknown.
 
 (defn- head*
@@ -199,7 +194,7 @@
               :when (and nm (not= "&" nm))]
           [nm t])))
 
-(declare tag-of bind-env interop-kind receiver-known? defn-forms predictions* thread-tag)
+(declare tag-of bind-env interop-kind receiver-known? predictions* thread-tag)
 
 (defn- arith-tag
   "primitive iff every operand is — except `/` over longs, which is
@@ -729,7 +724,6 @@
                       sh (cond (= ".." h) (some->> (or tok (head* st)) (str "."))
                                list? (head* st)
                                :else tok)
-                      hf (when list? (head-full c))
                       ik (interop-kind host sh)
                       at (if tok c st)                 ; a bare step has no meta; the compiler reports the thread form
                       args (if list? (rest (children st)) [])
@@ -1014,9 +1008,6 @@
                         (doseq [k kids] (walk env k))))))))]
       (walk env zloc)
       @out)))
-
-(defn- defn-forms [zloc]
-  (collect zloc (fn [c] (contains? #{"defn" "defn-" "defmethod" "defmacro"} (head-name c)))))
 
 (defn- ns-form-of
   "The location of the first (ns …) form under `zloc`, or nil."

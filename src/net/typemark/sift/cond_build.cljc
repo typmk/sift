@@ -20,7 +20,7 @@
   The counterpart is mechanical only when every step is
   `(if <test> (<f> <name> <args…>) <name>)` — that is exactly a cond-> pair.
   A step shaped any other way is reported without one."
-  (:require [net.typemark.sift.zip :refer [children peel op-name list-op inside-defn?
+  (:require [net.typemark.sift.zip :refer [op-name list-op inside-defn?
                                            collect binder-vec vec-pairs sexpr pos-of]]))
 
 (def rule :cond-as-build-up)

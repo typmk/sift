@@ -30,7 +30,7 @@
 (defn- probe [src]
   (with-redefs [data/rules nested-reference]
     (mapv :rule (data/findings "probe.clj"
-                               (z/edn* (parser/parse-string-all src)
+                               (z/of-node* (parser/parse-string-all src)
                                        {:track-position? true})))))
 
 (deftest a-meta-node-is-not-an-ancestor

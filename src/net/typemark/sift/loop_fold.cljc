@@ -17,7 +17,7 @@
   mentions the seq — `(first xs)` became the element — otherwise a `maybe`
   with the form still attached. `loop-as-map` runs first and owns the
   `[]`/`conj` special case; this rule skips a loop that one already named."
-  (:require [net.typemark.sift.zip :refer [peel list-op op-name call? inside-defn? collect two-binds single-body pos-of]]))
+  (:require [net.typemark.sift.zip :refer [list-op op-name call? inside-defn? collect two-binds single-body pos-of]]))
 
 (def rule :loop-as-reduce)
 

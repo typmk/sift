@@ -27,7 +27,7 @@
   where a person would write `(->> xs (map inc) (filter even?) …)`. The two
   expand to the same form; the second is the nicer of two correct answers and
   is not what this emits."
-  (:require [net.typemark.sift.zip :refer [children peel op-name list-op inside-defn?
+  (:require [net.typemark.sift.zip :refer [inside-defn?
                                            collect binder-vec vec-pairs sexpr pos-of]]))
 
 (def rule :let-as-thread)
@@ -62,7 +62,7 @@
           (when (and (every? some? links) (apply = links))
             (let [dir (first links)
                   [line col] (or (pos-of zloc) [nil nil])
-                  drop-arg (fn [[prev _] [_ rhs]]
+                  drop-arg (fn [_ [_ rhs]]
                              (let [args (vec (rest rhs))]
                                (cons (first rhs)
                                      (if (= dir :last) (pop args) (rest args)))))]

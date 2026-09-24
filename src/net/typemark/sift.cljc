@@ -17,8 +17,7 @@
   code it measures runs your side effects on the CI box. A REPL-side consumer
   that has already loaded the code is a different context and may rank higher;
   this surface is for the one that has not."
-  (:require #?(:clj  [net.typemark.sift.data-rules :refer [load-edn]]
-               :cljs [net.typemark.sift.data-rules :refer-macros [load-edn]]) [clojure.string :as str]
+  (:require [clojure.string :as str]
             [net.typemark.sift.access :as access]
             [net.typemark.sift.data :as data]
             [net.typemark.sift.analysis :as analysis]

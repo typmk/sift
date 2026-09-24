@@ -9,7 +9,7 @@
 #?(:clj
    (defmacro load-edn
      "Any EDN resource under net/typemark/sift, inlined at compile time — hosts.edn
-     and concepts.edn ride the same mechanism as rules.edn."
+     rides the same mechanism as rules.edn."
      [resource-name]
      (let [r (or (io/resource (str "net/typemark/sift/" resource-name))
                  (throw (ex-info (str resource-name " is not on the classpath") {})))]

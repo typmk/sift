@@ -1,9 +1,10 @@
 (ns net.typemark.sift.callgraph-test
   (:require [clojure.test :refer [deftest is testing]]
-            [net.typemark.sift.callgraph :as cg]))
+            [net.typemark.sift.callgraph :as cg]
+            [net.typemark.sift.json :as json]))
 
 (def analysis
-  (str "{\"analysis\":{\"var-usages\":["
+  (get (json/read-str (str "{\"analysis\":{\"var-usages\":["
        "{\"filename\":\"p.clj\",\"from\":\"probe\",\"from-var\":\"handler\","
        "\"to\":\"probe\",\"name\":\"danger\","
        "\"name-row\":4,\"name-col\":22,\"name-end-row\":4,\"name-end-col\":28},"
@@ -13,7 +14,9 @@
        "{\"filename\":\"p.clj\",\"from\":\"probe\",\"from-var\":\"innocent\","
        "\"to\":\"clojure.core\",\"name\":\"+\","
        "\"name-row\":5,\"name-col\":22,\"name-end-row\":5,\"name-end-col\":23}"
-       "]}}"))
+       "]}}")) "analysis"))
+
+(defn- parsed [s] (get (json/read-str s) "analysis"))
 
 (def seeds {:taints #{["probe" "untrusted"]} :reaches #{["probe" "danger"]}})
 
@@ -40,8 +43,7 @@
   (let [fs (cg/findings analysis seeds)]
     (is (= 1 (count fs)))
     (let [f (first fs)]
-      (is (= "interprocedural-taint" (:rule f)))
-      (is (= "p.clj" (:filename f)))
+      (is (= "p.clj" (:file f)))
       (is (re-find #"probe/handler" (:message f)))
       (testing "the flow shows both ends of the path"
         (is (= 2 (count (:flow f))))))))
@@ -55,7 +57,7 @@
   (is (empty? (cg/findings analysis {:taints #{} :reaches #{}}))))
 
 (def poly
-  (str "{\"analysis\":{"
+  (get (json/read-str (str "{\"analysis\":{"
        "\"var-definitions\":["
        "{\"filename\":\"h.clj\",\"ns\":\"h\",\"name\":\"tainted\",\"row\":30}],"
        "\"protocol-impls\":["
@@ -70,7 +72,7 @@
        "\"row\":20,\"name-row\":20,\"name-col\":12,\"name-end-row\":20,\"name-end-col\":18},"
        "{\"filename\":\"h.clj\",\"from\":\"h\",\"to\":\"probe\",\"name\":\"untrusted\","
        "\"row\":21,\"name-row\":21,\"name-col\":5,\"name-end-row\":21,\"name-end-col\":14}"
-       "]}}"))
+       "]}}")) "analysis"))
 
 (deftest a-protocol-implementation-owns-the-calls-in-its-body
   (let [g (cg/call-graph poly)]
@@ -112,7 +114,7 @@
       (is (contains? taints ["h" "handle"])))))
 
 (def computed-arm
-  (str "{\"analysis\":{"
+  (parsed (str "{\"analysis\":{"
        "\"var-definitions\":["
        "{\"filename\":\"c.clj\",\"ns\":\"c\",\"name\":\"after\",\"row\":40}],"
        "\"var-usages\":["
@@ -126,7 +128,7 @@
        "\"row\":30,\"name-row\":30,\"name-col\":12,\"name-end-row\":30,\"name-end-col\":18},"
        "{\"filename\":\"c.clj\",\"from\":\"c\",\"to\":\"probe\",\"name\":\"other\","
        "\"row\":31,\"name-row\":31,\"name-col\":5,\"name-end-row\":31,\"name-end-col\":10}"
-       "]}}"))
+       "]}}")))
 
 (deftest a-computed-dispatch-value-is-not-taken-as-a-name
   (let [g (cg/call-graph computed-arm)]
@@ -147,7 +149,7 @@
              (set (map :callee (get g ["c" "handle::[:a :b]"]))))))))
 
 (def foreign-arm
-  (str "{\"analysis\":{"
+  (parsed (str "{\"analysis\":{"
        "\"var-definitions\":["
        "{\"filename\":\"e.clj\",\"ns\":\"e\",\"name\":\"sink\",\"row\":50}],"
        "\"var-usages\":["
@@ -156,7 +158,7 @@
        "\"row\":10,\"name-row\":10,\"name-col\":12,\"name-end-row\":10,\"name-end-col\":18},"
        "{\"filename\":\"e.clj\",\"from\":\"e\",\"to\":\"probe\",\"name\":\"danger\","
        "\"row\":11,\"name-row\":11,\"name-col\":5,\"name-end-row\":11,\"name-end-col\":11}"
-       "]}}"))
+       "]}}")))
 
 (deftest an-arm-is-named-in-the-multimethods-namespace-not-the-files
   (let [g (cg/call-graph foreign-arm)]

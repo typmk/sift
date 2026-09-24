@@ -5,7 +5,8 @@
             [clojure.string :as str]
             [net.typemark.sift :as sift]
             [net.typemark.sift.typeflow :as tf]
-            [net.typemark.sift.resolve :as resolve]))
+            [net.typemark.sift.resolve :as resolve]
+            [net.typemark.sift.json :as json]))
 
 (def here
   (fs/parent (fs/parent (fs/real-path *file*))))
@@ -35,7 +36,7 @@
         host (if js? :js :jvm)
         files (cond->> (map #(str (fs/absolutize %)) (fs/glob root "**.{clj,cljc,cljs}"))
                 loaded (filter (fn [f] (some #(suffix? (str f) %) loaded))))
-        analysis (let [f (str odir "/analysis.json")] (when (fs/exists? f) (resolve/index (slurp f))))
+        analysis (let [f (str odir "/analysis.json")] (when (fs/exists? f) (resolve/index (get (json/read-str (slurp f)) "analysis"))))
         dump (let [f (str odir "/tags.edn")] (when (fs/exists? f) (edn/read-string (slurp f))))
         externs (let [f (str odir "/externs.edn")] (when (fs/exists? f) (edn/read-string (slurp f))))
         preds (set (for [f files
@@ -88,9 +89,9 @@
               (doseq [k (take 10 fns)] (println "     missed   " k))
               (doseq [k (take 10 fps)] (println "     wrong    " k))))))))
     (println)
-    (println "evidence ledger — derived from every rule's registry entry (sift/evidence)")
-    (doseq [[rung rules] (sort-by key (group-by (comp :evidence val) (sift/evidence)))]
+    (println "evidence, per rule, from the registry")
+    (doseq [[rung rules] (sort-by key (group-by :evidence (sift/rules (sift/linter {}))))]
       (printf "  %-10s %3d  %s%n" (clojure.core/name rung) (count rules)
-              (if (= rung :unjudged) (str/join " " (sort (map (comp clojure.core/name key) rules))) "")))
+              (if (= rung :unjudged) (str/join " " (sort (map (comp #(subs % 1) str :id) rules))) "")))
     (println)
     (println "the gate is the suite: bb test")))

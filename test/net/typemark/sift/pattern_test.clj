@@ -1,5 +1,5 @@
 (ns net.typemark.sift.pattern-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.test :refer [deftest is]]
             [net.typemark.sift.pattern :as p]))
 
 (deftest variables-bind-and-unify

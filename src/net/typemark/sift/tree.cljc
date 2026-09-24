@@ -93,3 +93,11 @@
       (str/includes? head "/")    (let [i (str/last-index-of head "/")]
                                     [(subs head 0 i) (subs head (inc i))])
       :else nil)))
+
+(defn span
+  [n]
+  {:line (:line n) :column (:col n) :end-line (:end-line n) :end-column (:end-col n)})
+
+(defn hit
+  [n message]
+  (assoc (span n) :message message))

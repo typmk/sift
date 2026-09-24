@@ -1,24 +1,18 @@
 (ns net.typemark.sift.data-ancestors-test
   (:require [clojure.test :refer [deftest is testing]]
             [net.typemark.sift.data :as data]
-            [rewrite-clj.parser :as parser]
-            [rewrite-clj.zip :as z]))
+            [net.typemark.sift.zip :as sz]
+            [rewrite-clj.parser :as parser]))
 
 (def ^:private nested-reference
   [{:id :nested-reference-probe
-    :kind :forbid
+    :extends :existence
     :either '[(atom ?&_) (ref ?&_)]
     :inside '(atom ?&_)
-    :category :correctness
-    :applicability :unspecified
-    :message "a reference type inside another"
-    :instruction "Hold one value in one atom."}])
+    :message "a reference type inside another"}])
 
 (defn- probe [src]
-  (with-redefs [data/rules nested-reference]
-    (mapv :rule (data/findings "probe.clj"
-                               (z/of-node* (parser/parse-string-all src)
-                                       {:track-position? true})))))
+  (mapv :rule (data/findings {} nested-reference (sz/of-root (parser/parse-string-all src)))))
 
 (deftest a-meta-node-is-not-an-ancestor
   (testing "an annotated construction is not a construction inside itself"

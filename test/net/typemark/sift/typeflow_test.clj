@@ -2,19 +2,12 @@
   (:require [clojure.test :refer [deftest is testing]]
             [net.typemark.sift.typeflow :as tf]))
 
-(defn- preds [src] (remove #(= :reflection-unwarned (:kind %)) (tf/predictions src "x.clj" :jvm)))
+(defn- preds [src] (tf/predictions src "x.clj" :jvm))
 (defn- kinds [src] (mapv :kind (preds src)))
 (defn- at [src] (mapv (juxt :kind :column) (preds src)))
-(defn- kinds* [src opts] (mapv :kind (remove #(= :reflection-unwarned (:kind %)) (tf/predictions src "x.clj" :jvm opts))))
-(defn- at* [src opts] (mapv (juxt :kind :column) (remove #(= :reflection-unwarned (:kind %)) (tf/predictions src "x.clj" :jvm opts))))
+(defn- kinds* [src opts] (mapv :kind (tf/predictions src "x.clj" :jvm opts)))
+(defn- at* [src opts] (mapv (juxt :kind :column) (tf/predictions src "x.clj" :jvm opts)))
 (defn- with [src opts] (kinds* src opts))
-
-(deftest the-file-rule-rides-beside-the-predictions
-  (is (some #(= :reflection-unwarned (:kind %)) (tf/predictions "(defn f [s] (.length s))" "x.clj" :jvm)))
-  (is (not-any? #(= :reflection-unwarned (:kind %))
-                (tf/predictions "(set! *warn-on-reflection* true)\n(defn f [^String s] (.length s))" "x.clj" :jvm)))
-  (testing "a static call counts as interop — the old host rule read only the member name and missed every Class/static"
-    (is (some #(= :reflection-unwarned (:kind %)) (tf/predictions "(defn f [s] (Integer/parseInt s))" "x.clj" :jvm)))))
 
 (deftest boxed-math-is-an-operand-the-compiler-cannot-unbox
   (testing "unhinted params box; hinted and literal operands do not"
@@ -63,7 +56,7 @@
         "an undumped static is known, unnamed")))
 
 (deftest the-js-host-predicts-without-an-externs-set-too
-  (is (= [:uninferred] (mapv :kind (remove #(= :reflection-unwarned (:kind %)) (tf/predictions "(defn f [x] (.foo x))" "x.cljs" :js))))))
+  (is (= [:uninferred] (mapv :kind (tf/predictions "(defn f [x] (.foo x))" "x.cljs" :js)))))
 
 (def classes
   {"OutputStreamWriter" {:supers ["Writer" "Object"] :ctors [{:params ["OutputStream"]} {:params ["OutputStream" "String"]} {:params ["OutputStream" "Charset"]}]
@@ -224,7 +217,7 @@
       "a double fits abs(float) too; the compiler takes abs(double) exactly, and the answer is a primitive double"))
 
 (deftest the-js-host-warns-on-an-untyped-target-with-a-non-extern-property
-  (let [js (fn [src] (mapv :kind (remove #(= :reflection-unwarned (:kind %)) (tf/predictions src "x.cljs" :js {:externs #{"beginPath" "length"}}))))]
+  (let [js (fn [src] (mapv :kind (tf/predictions src "x.cljs" :js {:externs #{"beginPath" "length"}})))]
     (is (= [:uninferred] (js "(defn f [d] (.-sameNs d))")))
     (is (= [] (js "(defn f [ctx] (.beginPath ctx))")) "an extern property is silent whatever the target")
     (is (= [] (js "(defn f [^js d] (.-sameNs d))")))

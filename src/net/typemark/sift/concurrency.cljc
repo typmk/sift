@@ -17,26 +17,23 @@
                         (contains? @locals (:text (tree/first-argument nodes %))))))
         (tree/children-of nodes form)))
 
-(defn findings
+(defn side-effect-in-swap
   [nodes]
-  (concat
-   (let [locals (delay (tree/let-bound-locals nodes #{"atom" "promise" "volatile!"}))]
-     (for [n (tree/lists-headed-by nodes retrying)
-           :when (effectful-call-inside? nodes locals n)]
-       {:rule "side-effect-in-swap"
-        :line (:line n) :col (:col n) :end-line (:end-line n) :end-col (:end-col n)
-        :message (str (:head n) " retries under contention, so the side effect inside it"
-                      " can happen more than once")}))
+  (let [locals (delay (tree/let-bound-locals nodes #{"atom" "promise" "volatile!"}))]
+    (for [n (tree/lists-headed-by nodes retrying)
+          :when (effectful-call-inside? nodes locals n)]
+      (tree/hit n (str (:head n) " retries under contention, so the side effect inside it"
+                       " can happen more than once")))))
 
-   (for [n (tree/lists-headed-by nodes #{"future"})
-         :let [parent (->> nodes
-                           (filter #(and (= :list (:tag %))
-                                         (< (:depth %) (:depth n))
-                                         (<= (:line %) (:line n))
-                                         (>= (:end-line %) (:end-line n))))
-                           (sort-by :depth)
-                           last)]
-         :when (and parent (contains? #{"do" "when" "when-let" "doseq" "dotimes"} (:head parent)))]
-     {:rule "discarded-future"
-      :line (:line n) :col (:col n) :end-line (:end-line n) :end-col (:end-col n)
-      :message "the value of this future is discarded, so an exception inside it is never seen"})))
+(defn discarded-future
+  [nodes]
+  (for [n (tree/lists-headed-by nodes #{"future"})
+        :let [parent (->> nodes
+                          (filter #(and (= :list (:tag %))
+                                        (< (:depth %) (:depth n))
+                                        (<= (:line %) (:line n))
+                                        (>= (:end-line %) (:end-line n))))
+                          (sort-by :depth)
+                          last)]
+        :when (and parent (contains? #{"do" "when" "when-let" "doseq" "dotimes"} (:head parent)))]
+    (tree/hit n "the value of this future is discarded, so an exception inside it is never seen")))

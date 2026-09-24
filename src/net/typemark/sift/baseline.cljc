@@ -25,9 +25,7 @@
 
 (defn render
   [baseline]
-  (str ";; sift baseline — findings the code has today; only NEW ones are reported.\n"
-       ";; key [file rule symbol] -> count. Paths as the caller gave them.\n"
-       (str/join "\n" (map pr-str (sort-by (comp str first) baseline)))
+  (str (str/join "\n" (map pr-str (sort-by (comp str first) baseline)))
        "\n"))
 
 (defn parse

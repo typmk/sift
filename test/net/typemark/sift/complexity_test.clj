@@ -1,5 +1,6 @@
 (ns net.typemark.sift.complexity-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [net.typemark.sift :as sift]
+            [clojure.test :refer [deftest is testing]]
             [clojure.test.check.clojure-test :refer [defspec]]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
@@ -136,9 +137,10 @@
   (let [src "(defn big [x] (if x (if x (if x (if x (if x (if x 1 2) 3) 4) 5) 6) 7))
              (defn small [x] (if x 1 2))"]
     (is (= 21 (cog src "big")))
-    (is (= ["big"] (map :function (cx/findings src nil))))
-    (is (= :cognitive-complexity (:rule (first (cx/findings src nil)))))
-    (is (empty? (cx/findings src nil 21)) "the threshold is exclusive")))
+    (let [over (fn [cfg] (filter #(= :complexity/cognitive-complexity (:rule %))
+                                 (:findings (sift/lint (sift/linter cfg) [{:path "a.clj" :text src}]))))]
+      (is (= '[big] (map :symbol (over {}))))
+      (is (empty? (over {:rules {:complexity/cognitive-complexity {:max 21}}})) "the maximum is exclusive"))))
 
 (deftest unparseable-source-is-an-error-not-a-zero
   (is (false? (:ok? (cx/report "(defn f [x")))))

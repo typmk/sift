@@ -3,7 +3,6 @@
             [clojure.walk :as walk]
             [rewrite-clj.zip :as z]))
 
-(def rule :place-as-fold)
 
 (def ^:private mutator-names
   #{"swap!" "reset!" "swap-vals!" "reset-vals!" "compare-and-set!"})
@@ -36,8 +35,6 @@
       (and (not (local-call? z))
            (core-named? (list-op z) n)))))
 
-(def instruction
-  "Do not accumulate in an atom. Use reduce (or into / group-by). Every branch, including else and catch, must return the accumulator. Do not swap! or reset!.")
 
 (defn- binds-name? [zloc nm]
   (or (when-let [vz (binder-vec zloc)]
@@ -215,7 +212,7 @@
                :coll coll
                :body (rewrite-ops body acc-sym)})))))))
 
-(defn- counterpart [let-zloc acc-sym init-val mutates]
+(defn- fix-of [let-zloc acc-sym init-val mutates]
   (let [doseqs (collect let-zloc
                         (fn [z] (= "doseq" (op-name (list-op z)))))
         host (some (fn [x] (when ((fn [d]
@@ -234,7 +231,7 @@
                      coll)
          :applicability :machine-applicable}))))
 
-(defn- finding [file let-zloc sym-zloc init-zloc usages]
+(defn- finding [let-zloc sym-zloc init-zloc usages]
   (let [nm (token-name sym-zloc)
         acc-sym (try (z/sexpr (peel sym-zloc)) (catch #?(:clj Exception :cljs :default) _ (symbol nm)))
         mutates (keep (fn [{:keys [zloc kind]}]
@@ -242,19 +239,15 @@
                           (z/up zloc)))
                       usages)
         [line col] (or (pos-of (peel init-zloc)) (pos-of (peel sym-zloc)) [nil nil])
-        cp (counterpart let-zloc acc-sym (atom-init-val init-zloc) mutates)]
-    (cond-> {:rule rule
-             :file file
-             :line line
+        cp (fix-of let-zloc acc-sym (atom-init-val init-zloc) mutates)]
+    (cond-> {:line line
              :column col
              :symbol acc-sym
-             :shape :atom-as-fold
-             :message "place used as a fold; the counterpart is reduce"
-             :instruction instruction
+             :message "place used as a fold; use reduce"
              :applicability (or (:applicability cp) :unspecified)}
-      (:form cp) (assoc :counterpart (:form cp)))))
+      (:form cp) (assoc :fix (:form cp)))))
 
-(defn- verdict [file let-zloc sym-zloc init-zloc]
+(defn- verdict [let-zloc sym-zloc init-zloc]
   (when-not (allowed? sym-zloc init-zloc)
     (let [nm (token-name sym-zloc)
           bind* (peel sym-zloc)
@@ -271,7 +264,7 @@
         (cond
           (contains? kinds :escape) nil
           (some #(decline-fn? % let-zloc) mutate-z) nil
-          :else (finding file let-zloc sym-zloc init-zloc usages))))))
+          :else (finding let-zloc sym-zloc init-zloc usages))))))
 
 (defn- atom-bindings [let-zloc]
   (when-let [vz (binder-vec let-zloc)]
@@ -280,12 +273,12 @@
       [lhs rhs])))
 
 (defn findings
-  [file zloc]
+  [zloc]
   (vec
    (mapcat
     (fn [let-z]
       (when (inside-defn? let-z)
         (keep (fn [[sym init]]
-                (verdict file let-z sym init))
+                (verdict let-z sym init))
               (atom-bindings let-z))))
     (collect zloc (fn [z] (contains? #{"let" "let*" "loop"} (op-name (list-op z))))))))

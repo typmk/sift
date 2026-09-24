@@ -18,7 +18,11 @@
                (when (or (empty? jvm) (not= jvm node))
                  (println "JVM and node disagree: diff target/jvm.edn target/node.edn")
                  (System/exit 1))
-               (println (count (str/split-lines jvm)) "rows, identical on the JVM and node")))}
+               (shell {:out "target/bb.edn"} "bb -cp src:test-cljs -m net.typemark.sift.parity")
+               (when (not= jvm (slurp "target/bb.edn"))
+                 (println "JVM and babashka disagree: diff target/jvm.edn target/bb.edn")
+                 (System/exit 1))
+               (println (count (str/split-lines jvm)) "rows, identical on the JVM, node and babashka")))}
 
   validate
   {:doc      "The measurement: typeflow against every corpus oracle in corpora/, and the evidence ledger. [--residue] [corpus …]"

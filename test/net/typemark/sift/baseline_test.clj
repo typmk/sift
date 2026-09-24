@@ -19,7 +19,6 @@
   (let [base (b/counts [f1 f2 f3])
         text (b/render base)]
     (is (= base (b/parse text)))
-    (is (= 2 (count (filter #(clojure.string/starts-with? % ";") (clojure.string/split-lines text)))))
     (testing "sorted, one entry per line, so a diff names the moved finding"
       (is (< (.indexOf text "a.clj") (.indexOf text "b.clj"))))))
 

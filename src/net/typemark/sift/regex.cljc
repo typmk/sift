@@ -33,28 +33,25 @@
             (and (= (:line a) (:line l)) (= (:col a) (:col l)))))
         (tree/lists-headed-by nodes branch-heads)))
 
-(defn findings [nodes]
-  (concat
-   (for [n nodes
-         :when (and (= :regex (:type n)) (not (:commented? n)))
-         :let [p (pattern-text n)]
-         :when (and p (redos? p))]
-     {:rule "redos-vulnerable-regex"
-      :line (:line n) :col (:col n) :end-line (:end-line n) :end-col (:end-col n)
-      :message (str "nested quantifier in " (:text n)
-                    " -- a short crafted input can take exponential time")})
+(defn redos-vulnerable-regex
+  [nodes]
+  (for [n nodes
+        :when (and (= :regex (:type n)) (not (:commented? n)))
+        :let [p (pattern-text n)]
+        :when (and p (redos? p))]
+    (tree/hit n (str "nested quantifier in " (:text n)
+                     " -- a short crafted input can take exponential time"))))
 
-   (for [l (tree/lists-headed-by nodes validating)
-         :let [a (tree/first-argument nodes l)]
-         :when (and a (= :regex (:type a)))
-         :let [p (pattern-text a)]
-         :when p
-         :let [multiline? (str/includes? p "(?m)")
-               anchored (anchored? p)]
-         :when (or (not anchored) multiline?)
-         :when (deciding? nodes l)]
-     {:rule "partial-match-validation"
-      :line (:line l) :col (:col l) :end-line (:end-line l) :end-col (:end-col l)
-      :message (str (:head l) " matches anywhere in the string, so this accepts any value"
-                    " CONTAINING a match"
-                    (when multiline? " -- (?m) makes ^ and $ line anchors, not string anchors"))})))
+(defn partial-match-validation
+  [nodes]
+  (for [l (tree/lists-headed-by nodes validating)
+        :let [a (tree/first-argument nodes l)]
+        :when (and a (= :regex (:type a)))
+        :let [p (pattern-text a)]
+        :when p
+        :let [multiline? (str/includes? p "(?m)")]
+        :when (or (not (anchored? p)) multiline?)
+        :when (deciding? nodes l)]
+    (tree/hit l (str (:head l) " matches anywhere in the string, so this accepts any value"
+                     " CONTAINING a match"
+                     (when multiline? " -- (?m) makes ^ and $ line anchors, not string anchors")))))

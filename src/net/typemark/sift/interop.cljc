@@ -33,11 +33,11 @@
     (str/includes? nm ".") nm
     :else (get imported nm)))
 
-(def detections
-  [{:key "xml-external-entity" :class "javax.xml.parsers.DocumentBuilderFactory" :member "newInstance"}
-   {:key "xml-external-entity" :class "javax.xml.parsers.SAXParserFactory" :member "newInstance"}
-   {:key "xml-external-entity" :class "javax.xml.transform.TransformerFactory" :member "newInstance"}
-   {:key "xml-external-entity" :class "javax.xml.stream.XMLInputFactory" :member "newInstance"}])
+(def ^:private detections
+  [{:class "javax.xml.parsers.DocumentBuilderFactory" :member "newInstance"}
+   {:class "javax.xml.parsers.SAXParserFactory" :member "newInstance"}
+   {:class "javax.xml.transform.TransformerFactory" :member "newInstance"}
+   {:class "javax.xml.stream.XMLInputFactory" :member "newInstance"}])
 
 (def ^:private by-target
   (reduce (fn [m r] (update m [(:class r) (:member r)] (fnil conj []) r)) {} detections))
@@ -101,16 +101,14 @@
     "javax.net.ssl.X509TrustManager" "javax.net.ssl.TrustManager"
     "javax.net.ssl.X509ExtendedTrustManager" "javax.net.ssl.HostnameVerifier"})
 
-(defn- trust-all-findings
+(defn trust-all-certificates
   [nodes]
   (for [n (tree/lists-headed-by nodes #{"reify" "proxy"})
         :when (some #(and (= :symbol (:type %)) (contains? trust-types (:text %)))
                     (tree/children-of nodes n))]
-    {:rule "trust-all-certificates"
-     :line (:line n) :col (:col n) :end-line (:end-line n) :end-col (:end-col n)
-     :message "hand-written TrustManager/HostnameVerifier -- confirm it does not accept every certificate"}))
+    (tree/hit n "hand-written TrustManager/HostnameVerifier -- confirm it does not accept every certificate")))
 
-(defn findings
+(defn xml-external-entity
   [nodes]
   (let [imported (imports nodes)]
     (for [n nodes
@@ -123,15 +121,6 @@
           :when (and (or (= (:member r) member)
                          (and (= :new (:member r)) (= :new member)))
                      (matches? nodes n r)
-                     (not (and (= "xml-external-entity" (:key r))
-                               (hardened? nodes n))))]
-      {:rule (:key r)
-       :line (:line n) :col (:col n)
-       :end-line (:end-line n) :end-col (:end-col n)
-       :message (str fq (when (string? member) (str "/" member))
-                     (if (= "xml-external-entity" (:key r))
-                       " -- confirm external entity resolution is disabled"
-                       " -- see the rule description"))})))
-
-(defn all-findings [nodes]
-  (concat (findings nodes) (trust-all-findings nodes)))
+                     (not (hardened? nodes n)))]
+      (tree/hit n (str fq (when (string? member) (str "/" member))
+                       " -- confirm external entity resolution is disabled")))))

@@ -3,8 +3,8 @@
             [net.typemark.sift.zip :refer [children peel head-name
                                            collect pos-of sexpr token-name
                                            vec-pairs]]
-            #?(:clj  [net.typemark.sift.data-rules :refer [load-edn]]
-               :cljs [net.typemark.sift.data-rules :refer-macros [load-edn]])
+            #?(:clj  [net.typemark.sift.embed :refer [load-edn]]
+               :cljs [net.typemark.sift.embed :refer-macros [load-edn]])
             [rewrite-clj.zip :as z]))
 
 (def hosts (load-edn "hosts.edn"))
@@ -237,11 +237,6 @@
   [preds]
   (into {} (for [p preds :when (= ::tag (:kind p))]
              [[(:line p) (:column p)] (:tag p)])))
-
-(defn tags
-  ([text path] (tags text path nil))
-  ([text path opts]
-   (tags-of (predictions text path (host-of path) (assoc opts :annotate? true)))))
 
 (defn imports
   [text]
@@ -672,7 +667,7 @@
                                 nm (some-> (second kids) peel z/string)]
                             (vswap! out conj {:kind :js-prop-on-own-object :line line :column col
                                               :op h :receiver nm :prop (subs h 2)
-                                              :counterpart (list 'aget (symbol nm) (subs h 2))})))
+                                              :fix (list 'aget (symbol nm) (subs h 2))})))
                         (when-let [ik (interop-kind host h)]
                           (when-let [recv (second kids)]
                             (if-not (receiver-known? host env recv)
@@ -711,10 +706,6 @@
     {:ns-name (ns-name-in ns-form)
      :imports (imports-in ns-form)
      :js-aliases (js-aliases-in ns-form)}))
-
-(defn var-tags
-  ([_text] {})
-  ([_text _host] {}))
 
 (defn- return-tag
   [host d]
@@ -767,22 +758,6 @@
             *resolve* (resolve-for path resolution)]
     (predictions* zloc path host (:ns-env opts))))
 
-(defn- reflection-unwarned
-  [host zloc path]
-  (when-let [switch (get-in hosts [host :warn-switch])]
-    (let [interop (collect zloc (fn [c] (let [f (head-full c)]
-                                          (and f (or (interop-kind host (head* c))
-                                                     (re-find (re-pattern (get-in hosts [host :interop :static])) f)
-                                                     (re-find (re-pattern (get-in hosts [host :interop :ctor])) f))))))
-          warned? (some (fn [c] (and (= "set!" (head-name c))
-                                     (= switch (some-> (children c) second peel z/string))))
-                        (collect zloc #(= "set!" (head-name %))))]
-      (when (and (seq interop) (not warned?))
-        (let [[line col] (or (pos-of (first interop)) [1 1])]
-          [{:kind :reflection-unwarned :line line :column col :file path
-            :count (count interop)
-            :counterpart (list 'set! (symbol switch) true)}])))))
-
 (defn- predictions*
   [zloc path host env]
   (if-not zloc
@@ -792,52 +767,29 @@
                 *imports* imports
                 *js-aliases* js-aliases
                 *tag-keywords* (get-in hosts [host :tag-keywords] #{})]
-       (-> (vec (for [d (->> (children zloc) (map peel) (filter #(and % (z/list? %) (not (contains? #{"ns" "comment"} (head-name %))))))
-                     :let [h (head-name d)
-                           nm (if (and h (str/starts-with? h "def")) (some-> (children d) second token-name) h)]
-                     p (predictions-in host {} d)]
-                 (assoc p :in nm :file path)))
-          (into (reflection-unwarned host zloc path)))))))
+        (vec (for [d (->> (children zloc) (map peel) (filter #(and % (z/list? %) (not (contains? #{"ns" "comment"} (head-name %))))))
+                   :let [h (head-name d)
+                         nm (if (and h (str/starts-with? h "def")) (some-> (children d) second token-name) h)]
+                   p (predictions-in host {} d)]
+               (assoc p :in nm :file path)))))))
 
-(def rules
-  {:typeflow/boxed-math   {:category :performance :evidence :compiler
-                           :note "seven corpora agree with the compiler exactly, 3,351 notes; blind first scores clojure-mcp 79/79, a held-out corpus 38/39, a numeric library P 0.82 R 0.99 — bb validate"}
-   :typeflow/reflection   {:category :performance :evidence :compiler
-                           :note "285 notes, all matched; blind first scores clojure-mcp P 0.92 R 0.75, a held-out corpus P 0.85, a numeric library P 0.71 R 0.88"}
-   :typeflow/uninferred   {:category :performance :evidence :compiler
-                           :note "a ClojureScript viewer before its warnings were fixed, 42 :infer-warnings: P 0.84 R 1.00 with Closure's externs; the 8 left are names shadow knows from a source not yet read"}
-   :js-prop-on-own-object {:category :correctness :evidence :corpus :note "found render.cljs:367 shipped; corpus flag/clear"
-                           :instruction "Read your own #js object with (aget obj \"k\"): #js writes a quoted key and .-k a renamable one, and :advanced renames one side."}
-   :reflection-unwarned   {:category :performance :evidence :corpus
-                           :instruction "Add (set! *warn-on-reflection* true) after the ns form so the compiler reports each reflective interop call."}})
+(defn analysis
+  [zloc path opts]
+  (let [preds (predictions-at zloc path (host-of path) (assoc opts :annotate? (= :jvm (host-of path))))
+        tag? #(= ::tag (:kind %))]
+    {:tags (tags-of preds)
+     :predictions (vec (remove tag? preds))}))
 
-(defn findings-of
-  [preds]
-  (for [{:keys [kind line column op tags receiver in prop counterpart count]} preds
-        :when (not= ::tag kind)]
-    (case kind
-      :js-prop-on-own-object
-      {:rule :js-prop-on-own-object :family :typeflow :line line :column column
-       :symbol (some-> receiver symbol) :shape :js-prop-on-own-object
-       :message (str ".-" prop " on " receiver ", which #js built here: :advanced renames one side")
-       :applicability :machine-applicable :counterpart counterpart
-       :category :correctness :instruction (get-in rules [:js-prop-on-own-object :instruction])}
-      :reflection-unwarned
-      {:rule :reflection-unwarned :family :typeflow :line line :column column
-       :symbol '*warn-on-reflection* :shape :reflection-unwarned
-       :message (str count " interop calls and no (set! *warn-on-reflection* true); reflective ones are silent")
-       :applicability :unspecified :counterpart counterpart
-       :category :performance :instruction (get-in rules [:reflection-unwarned :instruction])}
-      {:rule (keyword "typeflow" (name kind)) :family :typeflow
-       :line line :column column
-       :symbol (some-> in symbol)
-       :message (case kind
-                  :boxed-math (str op " over " (str/join ", " (map #(or % "Object") tags)) " boxes; hint or cast the operands")
-                  :reflection (str op " on " receiver " reflects; its tag is not known here")
-                  :uninferred (str op " on " receiver ": Closure cannot infer the target; hint ^js or use a js/ global"))
-       :applicability :unspecified})))
-
-(defn findings
-  ([text path] (findings text path nil))
-  ([text path opts]
-   (findings-of (predictions text path (host-of path) opts))))
+(defn hit
+  [{:keys [kind line column op tags receiver in prop fix]}]
+  (case kind
+    :js-prop-on-own-object
+    {:line line :column column :symbol (some-> receiver symbol)
+     :message (str ".-" prop " on " receiver ", which #js built here: :advanced renames one side")
+     :applicability :machine-applicable :fix fix}
+    {:line line :column column :symbol (some-> in symbol)
+     :message (case kind
+                :boxed-math (str op " over " (str/join ", " (map #(or % "Object") tags)) " boxes; hint or cast the operands")
+                :reflection (str op " on " receiver " reflects; its tag is not known here")
+                :uninferred (str op " on " receiver ": Closure cannot infer the target; hint ^js or use a js/ global"))
+     :applicability :unspecified}))

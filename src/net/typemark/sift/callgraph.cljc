@@ -1,5 +1,4 @@
-(ns net.typemark.sift.callgraph
-  (:require [net.typemark.sift.json :as json]))
+(ns net.typemark.sift.callgraph)
 
 (def ^:private js-max-row
   1000000)
@@ -66,9 +65,8 @@
          first)))
 
 (defn call-graph
-  [analysis-text]
-  (let [a (get (json/read-str analysis-text) "analysis")
-        regions (owner-regions a)
+  [a]
+  (let [regions (owner-regions a)
         g (reduce
            (fn [g u]
              (let [from (get u "from-var")
@@ -127,8 +125,8 @@
        (sort-by (juxt :line :col))))
 
 (defn findings
-  [analysis-text {:keys [taints reaches] :as direct}]
-  (let [graph (call-graph analysis-text)
+  [a {:keys [taints reaches] :as direct}]
+  (let [graph (call-graph a)
         {:keys [paths] :as closed} (propagate graph direct)]
     (for [caller paths
           :when (not (and (contains? (set taints) caller)
@@ -137,21 +135,20 @@
                                   (into (:taints closed) (:reaches closed)))
                 [a b] (take 2 sites)]
           :when a]
-      {:rule "interprocedural-taint"
-       :caller caller
-       :filename (:filename a)
-       :line (:line a) :col (:col a)
-       :end-line (:end-line a) :end-col (:end-col a)
+      {:caller caller
+       :file (:filename a)
+       :line (:line a) :column (:col a)
+       :end-line (:end-line a) :end-column (:end-col a)
        :source (some-> (:callee a) (#(str (first %) "/" (second %))))
        :sink (some-> (:callee (or b a)) (#(str (first %) "/" (second %))))
        :message (str (first caller) "/" (second caller)
                      " obtains attacker-influenced data via " (some-> (:callee a) second)
                      (when b (str " and passes it toward a sink via " (some-> (:callee b) second))))
-       :flow (cond-> [{:line (:line a) :col (:col a)
-                       :end-line (:end-line a) :end-col (:end-col a)
+       :flow (cond-> [{:line (:line a) :column (:col a)
+                       :end-line (:end-line a) :end-column (:end-col a)
                        :message (if b
                                   "attacker-influenced value obtained here"
                                   "attacker-influenced value passed toward a sink here")}]
-               b (conj {:line (:line b) :col (:col b)
-                        :end-line (:end-line b) :end-col (:end-col b)
+               b (conj {:line (:line b) :column (:col b)
+                        :end-line (:end-line b) :end-column (:end-col b)
                         :message "and passed toward a sink here"}))})))

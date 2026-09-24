@@ -21,27 +21,26 @@
                   (contains? helpers (:head %))))
         (tree/children-of nodes form)))
 
-(defn findings [nodes]
+(defn empty-test
+  [nodes]
   (let [helpers (assertion-helpers nodes)]
-   (concat
-   (for [n (tree/lists-headed-by nodes #{"deftest" "defspec"})
-         :when (not (asserts-inside? nodes helpers n))]
-     {:rule "empty-test"
-      :line (:line n) :col (:col n) :end-line (:end-line n) :end-col (:end-col n)
-      :message "this test asserts nothing, so it passes whatever the code does"})
+    (for [n (tree/lists-headed-by nodes #{"deftest" "defspec"})
+          :when (not (asserts-inside? nodes helpers n))]
+      (tree/hit n "this test asserts nothing, so it passes whatever the code does"))))
 
-   (for [n (tree/lists-headed-by nodes #{"testing"})
-         :when (not (asserts-inside? nodes helpers n))]
-     {:rule "testing-without-assertion"
-      :line (:line n) :col (:col n) :end-line (:end-line n) :end-col (:end-col n)
-      :message "this `testing` block contains no assertion"})
+(defn testing-without-assertion
+  [nodes]
+  (let [helpers (assertion-helpers nodes)]
+    (for [n (tree/lists-headed-by nodes #{"testing"})
+          :when (not (asserts-inside? nodes helpers n))]
+      (tree/hit n "this `testing` block contains no assertion"))))
 
-   (for [n (tree/lists-headed-by nodes #{"is"})
-         :let [a (tree/first-argument nodes n)]
-         :when (and a (= :list (:tag a))
-                    (contains? #{"=" "not=" "==" "<" ">" "<=" ">="} (:head a))
-                    (= 1 (count (tree/arguments nodes a))))]
-     {:rule "test-with-no-effect"
-      :line (:line n) :col (:col n) :end-line (:end-line n) :end-col (:end-col n)
-      :message (str "(" (:head a) " x) with one operand is always true, so this assertion"
-                    " cannot fail")}))))
+(defn test-with-no-effect
+  [nodes]
+  (for [n (tree/lists-headed-by nodes #{"is"})
+        :let [a (tree/first-argument nodes n)]
+        :when (and a (= :list (:tag a))
+                   (contains? #{"=" "not=" "==" "<" ">" "<=" ">="} (:head a))
+                   (= 1 (count (tree/arguments nodes a))))]
+    (tree/hit n (str "(" (:head a) " x) with one operand is always true, so this assertion"
+                     " cannot fail"))))

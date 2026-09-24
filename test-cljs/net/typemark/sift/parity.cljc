@@ -1,5 +1,6 @@
 (ns net.typemark.sift.parity
   (:require [net.typemark.sift :as sift]
+            [net.typemark.sift.registry :as registry]
             [clojure.string :as str]
             #?(:cljs ["fs" :as fs])
             #?(:cljs ["path" :as path])))
@@ -20,13 +21,21 @@
 
 (defn- flatten-units [us] (mapcat #(cons % (flatten-units (:children %))) us))
 
+(def ^:private config
+  {:rulesets (set (keys registry/rulesets))
+   :rules {:doc/ns-missing :info :doc/docstring :info :doc/comment :info
+           :tenancy/ambiguous-owner-check {:tenant-pattern "owner|tenant"}
+           :tenancy/unscoped-tenant-query {:tenant-pattern "owner|tenant"}}})
+
 (defn rows []
-  (sort
-   (for [p (files)
-         :let [{:keys [findings units]} (sift/analyze {:text (slurp* p) :path p})]
-         row (concat (for [f findings] [p (str (:rule f)) (:line f)])
-                     (for [u (flatten-units units)] [p (str (:name u)) (:cognitive u) (:cyclomatic u)]))]
-     row)))
+  (let [inputs (for [p (files)] {:path p :text (slurp* p)})
+        {:keys [findings errors]} (sift/lint (sift/linter config) inputs)]
+    (sort
+     (concat (for [f findings] [(:file f) (str (:rule f)) (:line f) (:column f)])
+             (for [e errors] [(:file e) "error"])
+             (for [{:keys [path text]} inputs
+                   u (flatten-units (sift/units text path))]
+               [path (str (:name u)) (:cognitive u) (:cyclomatic u)])))))
 
 (defn -main [& _]
   (doseq [r (rows)] (println (pr-str r))))

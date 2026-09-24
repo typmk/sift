@@ -1,10 +1,7 @@
 (ns net.typemark.sift.loop-fold
   (:require [net.typemark.sift.zip :refer [list-op op-name call? inside-defn? collect two-binds single-body pos-of]]))
 
-(def rule :loop-as-reduce)
 
-(def instruction
-  "Do not walk a seq with loop/recur to thread an accumulator. Use (reduce (fn [acc x] …) init coll). Keep the step expression; drop the seq binding and the exhaustion test.")
 
 (defn- seq-of? [form xs] (and (call? form "seq") (= xs (second form))))
 (defn- empty-of? [form xs] (and (call? form "empty?") (= xs (second form))))
@@ -56,7 +53,7 @@
               :else e))]
     (w expr)))
 
-(defn- finding [file zloc binds]
+(defn- finding [zloc binds]
   (let [syms (map first binds)
         body (single-body zloc)]
     (when-let [{:keys [xs walk done]} (split-if body syms)]
@@ -70,23 +67,19 @@
                   body' (rewrite expr xs el x)
                   mechanical? (and (mentions? body' acc) (not (mentions? body' xs)))
                   [line col] (or (pos-of zloc) [nil nil])]
-              {:rule rule
-               :file file
-               :line line
+              {:line line
                :column col
                :symbol acc
-               :shape :loop-as-reduce
-               :message (str "loop threads " acc " over " xs "; the counterpart is reduce")
-               :instruction instruction
+               :message (str "loop threads " acc " over " xs "; use reduce")
                :applicability (if mechanical? :machine-applicable :has-placeholders)
-               :counterpart (list 'reduce (list 'fn [acc x] body') init coll)})))))))
+               :fix (list 'reduce (list 'fn [acc x] body') init coll)})))))))
 
 (defn findings
-  ([file zloc] (findings file zloc #{}))
-  ([file zloc taken]
+  ([zloc] (findings zloc #{}))
+  ([zloc taken]
    (vec (keep (fn [lz]
                 (when (and (inside-defn? lz)
                            (not (contains? taken (pos-of lz))))
                   (when-let [b (two-binds lz)]
-                    (finding file lz b))))
+                    (finding lz b))))
               (collect zloc (fn [z] (= "loop" (op-name (list-op z)))))))))

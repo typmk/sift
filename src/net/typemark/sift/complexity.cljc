@@ -400,25 +400,3 @@
 (defn flatten-units
   [units]
   (mapcat (fn [u] (cons (dissoc u :children) (flatten-units (:children u)))) units))
-
-(def default-threshold
-  15)
-
-(defn over-threshold
-  [{:keys [ok? functions]} threshold]
-  (when ok?
-    (for [u (flatten-units functions) :when (> (:cognitive u) threshold)]
-      {:rule    :cognitive-complexity
-       :evidence :parity :note "5,519/5,531 units vs cccc on a code-graph tool; Spearman 0.989 vs SonarJS on LightTable"
-       :symbol  (some-> (:name u) symbol)
-       :line    (:line u) :col 1 :end-line (:line u) :end-col 2
-       :message (str (:name u) " has cognitive complexity " (:cognitive u)
-                     " (threshold " threshold "); cyclomatic " (:cyclomatic u)
-                     ", nesting " (:max-nesting u))
-       :cognitive (:cognitive u)
-       :function (:name u)})))
-
-(defn findings
-  ([source path] (findings source path default-threshold))
-  ([source path threshold]
-   (over-threshold (report source path) threshold)))

@@ -1,16 +1,8 @@
 (ns net.typemark.sift.host
   (:require [clojure.string :as str]
             [net.typemark.sift.zip :refer [children peel list-op op-name head-name
-                                           collect inside-defn? pos-of sexpr
-                                           token-name]]
+                                           collect inside-defn? pos-of sexpr token-name]]
             [rewrite-clj.zip :as z]))
-
-(def rules
-  {:catch-all-swallow     {:category :correctness
-                           :instruction "Do not turn a host exception into a constant. Return the failure as data — (ex-info …), {:error …}, or nil with the cause logged — or let it propagate."}
-   :mutable-escape        {:category :correctness
-                           :instruction "Do not return a host mutable. Convert at the boundary — (vec …), (into {} …), (js->clj …) — so callers receive a value."}
-   })
 
 (def ^:private catch-all-classes
   #{"Exception" "Throwable" "java.lang.Exception" "java.lang.Throwable"
@@ -24,7 +16,7 @@
              (or (nil? f) (keyword? f) (string? f) (number? f) (boolean? f)
                  (and (vector? f) (empty? f)) (and (map? f) (empty? f)))))))
 
-(defn- catch-all-swallow [file zloc]
+(defn catch-all-swallow [zloc]
   (for [c (collect zloc #(= "catch" (head-name %)))
         :when (inside-defn? c)
         :let [[_ cls _ & body] (children (peel c))
@@ -32,8 +24,8 @@
         :when (and cls-text (contains? catch-all-classes cls-text))
         :when (constant? (map #(sexpr % ::no) body))
         :let [[line col] (or (pos-of c) [nil nil])]]
-    {:rule :catch-all-swallow :file file :line line :column col
-     :symbol (symbol cls-text) :shape :catch-all-swallow
+    {:line line :column col
+     :symbol (symbol cls-text)
      :message (str "catch " cls-text " returns a constant; the host's failure is now a value that looks like success")
      :applicability :unspecified}))
 
@@ -67,18 +59,13 @@
           (last (children c))
           c)))))
 
-(defn- mutable-escape [file zloc]
+(defn mutable-escape [zloc]
   (for [d (collect zloc #(contains? #{"defn" "defn-"} (head-name %)))
         :let [lf (last-form d)]
         :when (and lf (mutable-form? lf))
         :let [[line col] (or (pos-of lf) [nil nil])
               nm (some-> (children (peel d)) second token-name)]]
-    {:rule :mutable-escape :file file :line line :column col
-     :symbol (some-> nm symbol) :shape :mutable-escape
+    {:line line :column col
+     :symbol (some-> nm symbol)
      :message (str (or nm "fn") " returns a host mutable; callers will assume a value")
      :applicability :unspecified}))
-
-(defn findings
-  [file zloc]
-  (-> (vec (catch-all-swallow file zloc))
-      (into (mutable-escape file zloc))))

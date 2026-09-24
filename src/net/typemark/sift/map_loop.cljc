@@ -1,10 +1,7 @@
 (ns net.typemark.sift.map-loop
   (:require [net.typemark.sift.zip :refer [list-op op-name call? inside-defn? collect two-binds single-body pos-of]]))
 
-(def rule :loop-as-map)
 
-(def instruction
-  "Do not walk a seq with loop/recur and conj onto an out vector. Use (into [] (map f) xs) or (into [] (comp (filter p) (map f)) xs). Keep the element transform; drop the out binding.")
 
 (defn- rest-of? [form xs]
   (and (or (call? form "rest") (call? form "next"))
@@ -75,7 +72,7 @@
                  :else e))]
     (walk expr)))
 
-(defn- counterpart [src expr xs el pred]
+(defn- fix-of [src expr xs el pred]
   (let [body (rewrite-el expr xs el)
         pred* (when pred (rewrite-el pred xs el))
         map-only? (and (seq? body) (symbol? (first body)) (= 2 (count body)) (= 'x (second body)))
@@ -102,27 +99,23 @@
       (and (symbol? a) (symbol? b) (= [] ai))
       {:xs b :src bi :out a :xs-first? false})))
 
-(defn- finding [file zloc binds]
+(defn- finding [zloc binds]
   (when-let [{:keys [xs src out xs-first?]} (classify-binds binds)]
     (when-let [{:keys [expr el pred]} (match-if (single-body zloc) xs out xs-first?)]
       (let [[line col] (or (pos-of zloc) [nil nil])
-            cp (counterpart src expr xs el pred)]
-        (cond-> {:rule rule
-                 :file file
-                 :line line
+            cp (fix-of src expr xs el pred)]
+        (cond-> {:line line
                  :column col
                  :symbol xs
-                 :shape :loop-as-map
-                 :message "loop is a map; the counterpart is into/map"
-                 :instruction instruction
+                 :message "loop is a map; use into with map"
                  :applicability (:applicability cp)}
-          (:form cp) (assoc :counterpart (:form cp)))))))
+          (:form cp) (assoc :fix (:form cp)))))))
 
 (defn findings
-  [file zloc]
+  [zloc]
   (vec
    (keep (fn [lz]
            (when (inside-defn? lz)
              (when-let [b (two-binds lz)]
-               (finding file lz b))))
+               (finding lz b))))
          (collect zloc (fn [z] (= "loop" (op-name (list-op z))))))))

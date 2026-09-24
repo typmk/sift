@@ -1,6 +1,5 @@
 (ns net.typemark.sift.security
-  (:require [net.typemark.sift.parse :as parse]
-            [net.typemark.sift.tree :as tree]))
+  (:require [net.typemark.sift.tree :as tree]))
 
 (def ^:private sources
   #{"slurp" "read-line" "System/getenv" "System/getProperty"
@@ -18,12 +17,6 @@
 
 (def ^:private credential-name
   #"(?i)(^|[-_*/.])(passwords?|passwds?|secrets?|api[-_]?keys?|tokens?|credentials?|private[-_]?keys?|access[-_]?keys?|client[-_]?secrets?)([-_*?!]|$)")
-
-(defn- finding [rule node message]
-  {:rule rule
-   :line (:line node) :col (:col node)
-   :end-line (:end-line node) :end-col (:end-col node)
-   :message message})
 
 (defn- dynamic-arg? [nodes lst]
   (let [a (tree/first-argument nodes lst)]
@@ -47,42 +40,43 @@
             (re-matches #"[-dlbcps][-r][-w][-xsS][-r][-w][-xsS][-r][-w][-xtT]" s)
             (re-matches #"[-r][-w][-xsS][-r][-w][-xsS][-r][-w][-xtT]" s)))))
 
-(defn findings
+(defn shell-invocation
   [nodes]
-  (concat
-   (for [l (tree/lists-headed-by nodes shell-fns)
-         :when (not (any-dynamic-arg? nodes l))]
-     (finding "shell-invocation" l
-              "shell invocation -- confirm no argument is caller-controlled"))
+  (for [l (tree/lists-headed-by nodes shell-fns)
+        :when (not (any-dynamic-arg? nodes l))]
+    (tree/hit l "shell invocation -- confirm no argument is caller-controlled")))
 
-   (for [l (tree/lists-headed-by nodes #{"def" "defonce"})
-         :let [args (tree/arguments nodes l)
-               nm   (first args)
-               nm-text (some->> nm (tree/text nodes))
-               v    (let [lst (last args)]
-                      (when (and (= :string (:type lst))
-                                 (or (= 2 (count args))
-                                     (not= lst (second args))))
-                        lst))]
-         :when (and nm v (re-find credential-name nm-text)
-                    (> (count (:text v)) 6)
-                    (not (re-find #"(?i)[-_](type|kind|name|id|header|field|param|path|env|key-name)$" nm-text)))]
-     (finding "hardcoded-credential" v
-              (str "credential-shaped name '" nm-text "' is bound to a literal")))
+(defn hardcoded-credential
+  [nodes]
+  (for [l (tree/lists-headed-by nodes #{"def" "defonce"})
+        :let [args (tree/arguments nodes l)
+              nm   (first args)
+              nm-text (some->> nm (tree/text nodes))
+              v    (let [lst (last args)]
+                     (when (and (= :string (:type lst))
+                                (or (= 2 (count args))
+                                    (not= lst (second args))))
+                       lst))]
+        :when (and nm v (re-find credential-name nm-text)
+                   (> (count (:text v)) 6)
+                   (not (re-find #"(?i)[-_](type|kind|name|id|header|field|param|path|env|key-name)$" nm-text)))]
+    (tree/hit v (str "credential-shaped name '" nm-text "' is bound to a literal"))))
 
-   (for [l (tree/lists-headed-by nodes xml-fns)]
-     (finding "xml-external-entity" l
-              "confirm this parser has external entity resolution disabled"))
+(defn xml-parse
+  [nodes]
+  (for [l (tree/lists-headed-by nodes xml-fns)]
+    (tree/hit l "confirm this parser has external entity resolution disabled")))
 
-   (for [n nodes
-         :when (and (= :string (:type n)) (not (:commented? n)))
-         :let [s (tree/unquote-string n)]
-         :when (world-accessible? s)
-         :let [p (tree/parent nodes n)]
-         :when (and p (contains? tree/call-tags (:tag p))
-                    (re-find #"(?i)chmod|perm|mode|umask|^sh$|shell|exec|mkdir|create|open|write" (or (:head p) "")))]
-     (finding "permissive-file-permissions" n
-              (str "mode " s " grants access to others")))))
+(defn permissive-file-permissions
+  [nodes]
+  (for [n nodes
+        :when (and (= :string (:type n)) (not (:commented? n)))
+        :let [s (tree/unquote-string n)]
+        :when (world-accessible? s)
+        :let [p (tree/parent nodes n)]
+        :when (and p (contains? tree/call-tags (:tag p))
+                   (re-find #"(?i)chmod|perm|mode|umask|^sh$|shell|exec|mkdir|create|open|write" (or (:head p) "")))]
+    (tree/hit n (str "mode " s " grants access to others"))))
 
 (defn- namespace-name [nodes]
   (when-let [nsform (first (tree/lists-headed-by nodes #{"ns"}))]
@@ -138,11 +132,3 @@
        :reaches (into #{} (keep var-of)
                       (concat (dangerous-sinks nodes)
                               (reaching-sinks nodes)))})))
-
-(defn seeds-of-source [source]
-  (let [{:keys [ok? nodes]} (parse/parse source)]
-    (when ok? (seeds nodes))))
-
-(defn findings-of-source [source]
-  (let [{:keys [ok? nodes]} (parse/parse source)]
-    (when ok? (vec (findings nodes)))))

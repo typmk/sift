@@ -8,8 +8,10 @@
             [net.typemark.sift.parse :as parse]))
 
 (defn- nodes [s] (:nodes (parse/parse s)))
-(defn- rules-for [s] (set (map :rule (interop/all-findings (nodes s)))))
-(defn- conc-for [s] (set (map :rule (concurrency/findings (nodes s)))))
+(defn- xxe? [s] (boolean (seq (interop/xml-external-entity (nodes s)))))
+(defn- trust? [s] (boolean (seq (interop/trust-all-certificates (nodes s)))))
+(defn- swap-effect? [s] (boolean (seq (concurrency/side-effect-in-swap (nodes s)))))
+(defn- discarded? [s] (boolean (seq (concurrency/discarded-future (nodes s)))))
 
 (def ^:private ns-form
   "(ns app
@@ -30,59 +32,56 @@
       (is (= "java.io.ObjectInputStream" (get i "ObjectInputStream"))))))
 
 (deftest catches-the-jdk-misuse-clojure-inherits
-    (is (contains? (rules-for (str ns-form "(DocumentBuilderFactory/newInstance)"))
-                 "xml-external-entity"))
-  )
+  (is (xxe? (str ns-form "(DocumentBuilderFactory/newInstance)"))))
 
 (deftest does-not-fire-on-the-safe-call
   (testing "commented-out code is not a finding"
-    (is (empty? (rules-for (str ns-form "#_(ObjectInputStream. in)"))))))
+    (is (not (xxe? (str ns-form "#_(DocumentBuilderFactory/newInstance)"))))))
 
 (deftest a-hardened-xml-parser-is-not-a-finding
   (testing "an untouched factory is a finding"
-    (is (contains? (rules-for "(ns a (:import [javax.xml.parsers DocumentBuilderFactory]))
-                               (defn f [] (DocumentBuilderFactory/newInstance))")
-                   "xml-external-entity")))
+    (is (xxe? "(ns a (:import [javax.xml.parsers DocumentBuilderFactory]))
+               (defn f [] (DocumentBuilderFactory/newInstance))")))
   (testing "one locked down in the same form is not"
     (doseq [guard ["(.setFeature f \"http://apache.org/xml/features/disallow-doctype-decl\" true)"
                    "(.setFeature f javax.xml.XMLConstants/FEATURE_SECURE_PROCESSING true)"
                    "(.setExpandEntityReferences f false)"]]
-      (is (empty? (rules-for (str "(ns a (:import [javax.xml.parsers DocumentBuilderFactory]))
-                                   (defn f [] (doto (DocumentBuilderFactory/newInstance) "
-                                  guard "))")))
+      (is (not (xxe? (str "(ns a (:import [javax.xml.parsers DocumentBuilderFactory]))
+                           (defn f [] (doto (DocumentBuilderFactory/newInstance) "
+                          guard "))")))
           guard))))
 
 (deftest catches-disabled-certificate-validation
   (testing "a hand-written TrustManager exists to switch the check off"
-    (is (contains? (rules-for "(reify javax.net.ssl.X509TrustManager
-                                 (checkServerTrusted [_ _ _] nil))")
-                   "trust-all-certificates"))
-    (is (contains? (rules-for "(proxy [javax.net.ssl.HostnameVerifier] []
-                                 (verify [_ _] true))")
-                   "trust-all-certificates")))
+    (is (trust? "(reify javax.net.ssl.X509TrustManager
+                   (checkServerTrusted [_ _ _] nil))"))
+    (is (trust? "(proxy [javax.net.ssl.HostnameVerifier] []
+                   (verify [_ _] true))")))
   (testing "an unrelated reify is not a finding"
-    (is (empty? (rules-for "(reify java.lang.Runnable (run [_] nil))")))))
+    (is (not (trust? "(reify java.lang.Runnable (run [_] nil))")))))
 
 (deftest concurrency-rules-target-what-clojure-actually-gets-wrong
   (testing "a side effect inside a retrying update can happen twice"
-    (is (contains? (conc-for "(swap! a (fn [v] (println v) (inc v)))") "side-effect-in-swap"))
-    (is (contains? (conc-for "(alter r (fn [v] (send agt f) v))") "side-effect-in-swap")))
-  (testing "a pure update is not flagged -- that is the whole point of swap!"
-    (is (empty? (conc-for "(swap! a inc)")))
-    (is (empty? (conc-for "(swap! a (fn [v] (assoc v :k 1)))"))))
+    (is (swap-effect? "(swap! a (fn [v] (println v) (inc v)))"))
+    (is (swap-effect? "(alter r (fn [v] (send agt f) v))")))
   (testing "a second swap! later on the same line is not inside the first"
-    (is (empty? (conc-for "(if f (swap! a assoc k f) (swap! a dissoc k))"))))
+    (is (not (swap-effect? "(if f (swap! a assoc k f) (swap! a dissoc k))"))))
+  (testing "a pure update is not flagged"
+    (is (not (swap-effect? "(swap! a inc)")))
+    (is (not (swap-effect? "(swap! a (fn [v] (assoc v :k 1)))"))))
   (testing "a future used as a statement swallows its exception"
-    (is (contains? (conc-for "(do (future (risky!)) :ok)") "discarded-future")))
+    (is (discarded? "(do (future (risky!)) :ok)")))
   (testing "a future whose value is taken is fine"
-    (is (empty? (conc-for "(let [f (future (risky!))] @f)")))))
+    (is (not (discarded? "(let [f (future (risky!))] @f)")))))
 
 (defspec interop-never-throws 300
   (prop/for-all [s gen/string]
     (let [{:keys [ok? nodes]} (parse/parse s)]
-      (or (not ok?) (seq? (interop/all-findings nodes)) (vector? (interop/all-findings nodes))))))
+      (or (not ok?)
+          (seqable? (concat (interop/xml-external-entity nodes) (interop/trust-all-certificates nodes)))))))
 
 (defspec concurrency-never-throws 300
   (prop/for-all [s gen/string]
     (let [{:keys [ok? nodes]} (parse/parse s)]
-      (or (not ok?) (some? (seq (concurrency/findings nodes))) true))))
+      (or (not ok?)
+          (seqable? (doall (concat (concurrency/side-effect-in-swap nodes) (concurrency/discarded-future nodes))))))))

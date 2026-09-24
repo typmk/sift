@@ -35,6 +35,7 @@ jobs:
       - uses: DeLaGuardo/setup-clojure@13.4
         with:
           cli: latest
+          bb: latest
       - uses: actions/cache@v4
         with:
           path: |
@@ -44,7 +45,8 @@ jobs:
           restore-keys: cdeps-
       - run: clojure -M:parity > jvm.edn
       - run: clojure -M:cljs && node target/parity.js > node.edn
-      - run: test -s jvm.edn && diff jvm.edn node.edn
+      - run: bb -cp src:test-cljs -m net.typemark.sift.parity > bb.edn
+      - run: test -s jvm.edn && diff jvm.edn node.edn && diff jvm.edn bb.edn
 
   cli:
     runs-on: ubuntu-latest
@@ -59,9 +61,9 @@ jobs:
           bb: latest
       - run: |
           c=test/net/typemark/sift/corpus
-          for k in refactor complexity security correctness; do bin/sift lint --category $k $c/clear; done
-          for k in refactor security; do
-            if bin/sift lint --category $k $c/flag > /dev/null; then echo "flag corpus reported no $k finding"; exit 1; fi
+          for k in complexity style suspicious security correctness; do bin/sift lint --no-kondo --fail-level info --ruleset $k $c/clear; done
+          for k in complexity security; do
+            if bin/sift lint --no-kondo --fail-level info --ruleset $k $c/flag > /dev/null; then echo "flag corpus reported no $k finding"; exit 1; fi
           done
 
   lint:

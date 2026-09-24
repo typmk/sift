@@ -2,10 +2,7 @@
   (:require [net.typemark.sift.zip :refer [children peel list-op op-name inside-defn? collect pos-of]]
             [rewrite-clj.zip :as z]))
 
-(def rule :cond-as-case)
 
-(def instruction
-  "Do not compare one value against literals clause by clause. Use case: (case x :a … :b … default). Keep the clause bodies; drop the (= x …) tests.")
 
 (defn- literal? [v]
   (or (keyword? v) (number? v) (string? v) (char? v) (nil? v) (boolean? v)))
@@ -28,7 +25,7 @@
     (when (and (even? (count forms)) (not-any? #{::no} forms))
       (partition 2 forms))))
 
-(defn- finding [file zloc]
+(defn- finding [zloc]
   (when-let [cs (seq (clauses zloc))]
     (let [else? (contains? #{:else :default} (first (last cs)))
           body (if else? (butlast cs) cs)
@@ -40,22 +37,18 @@
               ks (map second tests)
               mechanical? (every? case-key? ks)
               [line col] (or (pos-of zloc) [nil nil])]
-          (cond-> {:rule rule
-                   :file file
-                   :line line
+          (cond-> {:line line
                    :column col
                    :symbol x
-                   :shape :cond-as-case
-                   :message (str "cond compares " x " against " (count body) " literals; the counterpart is case")
-                   :instruction instruction
+                   :message (str "cond compares " x " against " (count body) " literals; use case")
                    :applicability (if mechanical? :machine-applicable :unspecified)}
             mechanical?
-            (assoc :counterpart
+            (assoc :fix
                    (concat (list 'case x)
                            (mapcat (fn [[k [_ expr]]] [k expr]) (map vector ks body))
                            [(if else? (second (last cs)) nil)]))))))))
 
 (defn findings
-  [file zloc]
-  (vec (keep #(when (inside-defn? %) (finding file %))
+  [zloc]
+  (vec (keep #(when (inside-defn? %) (finding %))
              (collect zloc (fn [z] (= "cond" (op-name (list-op z))))))))

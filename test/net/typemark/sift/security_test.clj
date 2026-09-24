@@ -3,34 +3,40 @@
             [clojure.test.check.clojure-test :refer [defspec]]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
+            [net.typemark.sift.parse :as parse]
             [net.typemark.sift.security :as security]))
 
-(defn- rules-for [src] (set (map :rule (security/findings-of-source src))))
+(def ^:private rules
+  [security/shell-invocation security/hardcoded-credential security/xml-parse security/permissive-file-permissions])
+
+(defn- hits [src]
+  (let [{:keys [ok? nodes]} (parse/parse src)]
+    (when ok? (vec (mapcat #(% nodes) rules)))))
+
+(defn- credential? [src]
+  (boolean (seq (security/hardcoded-credential (:nodes (parse/parse src))))))
 
 (deftest detects-hardcoded-secrets
-  (is (contains? (rules-for "(def api-key \"sk-live-abcdef\")") "hardcoded-credential")))
+  (is (credential? "(def api-key \"sk-live-abcdef\")")))
 
 (deftest states-its-own-limits
   (testing "commented-out code is not a finding"
-    (is (empty? (rules-for "#_(def api-key \"sk-live-abcdef\")"))))
+    (is (empty? (hits "#_(def api-key \"sk-live-abcdef\")"))))
   (testing "a short literal is not treated as a credential"
-    (is (not (contains? (rules-for "(def token \"x\")") "hardcoded-credential"))))
-  (testing "the credential name is matched on segment boundaries -- `bypass`
-            is not `pass`, and a rule that cries wolf gets ignored"
+    (is (not (credential? "(def token \"x\")"))))
+  (testing "the credential name is matched on segment boundaries"
     (doseq [nm ["*jvm-wide-hostname-bypass-permitted?*" "tokenizer" "compass" "passthrough"]]
-      (is (not (contains? (rules-for (str "(def " nm " \"aaaaaaaaaa\")")) "hardcoded-credential"))
-          nm))
+      (is (not (credential? (str "(def " nm " \"aaaaaaaaaa\")"))) nm))
     (doseq [nm ["api-key" "db-password" "client-secret" "auth-token"]]
-      (is (contains? (rules-for (str "(def " nm " \"aaaaaaaaaa\")")) "hardcoded-credential")
-          nm))))
+      (is (credential? (str "(def " nm " \"aaaaaaaaaa\")")) nm))))
 
 (defspec never-throws-on-arbitrary-source 300
   (prop/for-all [s gen/string]
-    (let [r (security/findings-of-source s)]
+    (let [r (hits s)]
       (or (nil? r) (vector? r)))))
 
 (defspec every-finding-has-a-usable-range 300
   (prop/for-all [s gen/string-alphanumeric]
-    (every? (fn [f] (and (>= (:line f) 1) (>= (:col f) 1)
-                         (> (:end-col f) 0)))
-            (or (security/findings-of-source s) []))))
+    (every? (fn [f] (and (>= (:line f) 1) (>= (:column f) 1)
+                         (> (:end-column f) 0)))
+            (or (hits s) []))))

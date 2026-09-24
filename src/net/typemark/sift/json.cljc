@@ -6,3 +6,8 @@
   #?(:bb   (json/parse-string s)
      :clj  (json/read-str s)
      :cljs (js->clj (js/JSON.parse s))))
+
+(defn write-str [x]
+  #?(:bb   (json/generate-string x)
+     :clj  (json/write-str x)
+     :cljs (js/JSON.stringify (clj->js x))))

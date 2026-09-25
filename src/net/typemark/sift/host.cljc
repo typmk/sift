@@ -1,33 +1,17 @@
 (ns net.typemark.sift.host
-  (:require [clojure.string :as str]
+  (:require [net.typemark.sift.portable.host :as host]
+            [clojure.string :as str]
             [net.typemark.sift.zip :refer [children peel list-op op-name head-name
                                            collect inside-defn? pos-of sexpr token-name]]
             [rewrite-clj.zip :as z]))
 
-(def ^:private catch-all-classes
-  #{"Exception" "Throwable" "java.lang.Exception" "java.lang.Throwable"
-    ":default" "js/Error" "js/Object" "Object"})
-
-(defn- constant?
-  [forms]
-  (or (empty? forms)
-      (and (= 1 (count forms))
-           (let [f (first forms)]
-             (or (nil? f) (keyword? f) (string? f) (number? f) (boolean? f)
-                 (and (vector? f) (empty? f)) (and (map? f) (empty? f)))))))
-
 (defn catch-all-swallow [zloc]
   (for [c (collect zloc #(= "catch" (head-name %)))
         :when (inside-defn? c)
-        :let [[_ cls _ & body] (children (peel c))
-              cls-text (some-> cls peel z/string)]
-        :when (and cls-text (contains? catch-all-classes cls-text))
-        :when (constant? (map #(sexpr % ::no) body))
+        :let [hit (host/catch-all-swallow (sexpr c ::no))]
+        :when hit
         :let [[line col] (or (pos-of c) [nil nil])]]
-    {:line line :column col
-     :symbol (symbol cls-text)
-     :message (str "catch " cls-text " returns a constant; the host's failure is now a value that looks like success")
-     :applicability :unspecified}))
+    (assoc hit :line line :column col)))
 
 (def ^:private host-mutables
   #{"ArrayList" "LinkedList" "HashMap" "LinkedHashMap" "TreeMap" "HashSet"

@@ -2,6 +2,7 @@
   (:require [clj-kondo.hooks-api :as api]
             [net.typemark.sift.portable.complexity :as complexity]
             [net.typemark.sift.portable.cond-case :as cond-case]
+            [net.typemark.sift.portable.host :as host]
             [net.typemark.sift.portable.prose :as prose]
             [net.typemark.sift.portable.shape :as shape]))
 
@@ -103,4 +104,12 @@
                (not-any? #(= 'comment (:name %)) stack))
       (cognitive-complexity ctx stack)
       (docstrings ctx)))
+  nil)
+
+(defn try-form
+  [{:keys [node]}]
+  (when (inside-defn?)
+    (doseq [c (:children node)
+            :when (= :list (api/tag c))]
+      (report! c :sift/catch-all-swallow (host/catch-all-swallow (api/sexpr c)))))
   nil)

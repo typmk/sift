@@ -66,6 +66,7 @@
   (loop [c (z/up zloc)]
     (cond
       (nil? c) false
+      (= :fn (z/tag c)) true
       (contains? defining-forms (head-name c)) true
       :else (recur (z/up c)))))
 

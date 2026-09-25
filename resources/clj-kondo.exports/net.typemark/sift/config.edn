@@ -1,5 +1,7 @@
 {:hooks {:analyze-call {clojure.core/cond net.typemark.sift.kondo/cond-as-case
                         cljs.core/cond net.typemark.sift.kondo/cond-as-case
+                        clojure.core/try net.typemark.sift.kondo/try-form
+                        cljs.core/try net.typemark.sift.kondo/try-form
                         clojure.core/loop net.typemark.sift.kondo/loop-form
                         cljs.core/loop net.typemark.sift.kondo/loop-form
                         clojure.core/let net.typemark.sift.kondo/let-form
@@ -43,6 +45,7 @@
                         clojure.core/defprotocol net.typemark.sift.kondo/definition
                         cljs.core/defprotocol net.typemark.sift.kondo/definition}}
  :linters {:sift/cond-as-case {:level :info}
+           :sift/catch-all-swallow {:level :warning}
            :sift/loop-as-map {:level :warning}
            :sift/loop-as-reduce {:level :warning}
            :sift/cond-as-build-up {:level :warning :min 3}

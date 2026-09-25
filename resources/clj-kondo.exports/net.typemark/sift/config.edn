@@ -35,4 +35,6 @@
                         cljs.core/def net.typemark.sift.kondo/cognitive-complexity
                         cljs.core/defonce net.typemark.sift.kondo/cognitive-complexity}}
  :linters {:sift/cond-as-case {:level :info}
-           :sift/cognitive-complexity {:level :warning :max 15}}}
+           :sift/cognitive-complexity {:level :warning :max 15}
+           :discouraged-java-method {java.lang.Thread {sleep {:message "Thread/sleep blocks a host thread"}}
+                                     java.io.File {createTempFile {:message "File/createTempFile is predictable and world-readable by default"}}}}}

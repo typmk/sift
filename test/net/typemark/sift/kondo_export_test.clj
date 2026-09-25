@@ -2,7 +2,9 @@
   (:require [clj-kondo.core :as kondo]
             [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing]]
-            [net.typemark.sift :as sift]))
+            [clojure.edn :as edn]
+            [net.typemark.sift :as sift]
+            [net.typemark.sift.registry :as registry]))
 
 (def ^:private export "resources/clj-kondo.exports/net.typemark/sift")
 
@@ -38,3 +40,17 @@
         s (sift-hits dir)]
     (is (seq s) "the corpus must trip both rules, or the comparison is vacuous")
     (is (= s k) (str "only sift: " (pr-str (sort (remove k s))) "\nonly clj-kondo: " (pr-str (sort (remove s k)))))))
+
+(deftest static-call-rules-are-config-with-the-registry-s-words
+  (let [cfg (edn/read-string (slurp (io/file export "config.edn")))
+        msg (fn [id] (:message (first (filter #(= id (:id %)) registry/built-in))))]
+    (is (= (msg :performance/thread-sleep)
+           (get-in cfg [:linters :discouraged-java-method 'java.lang.Thread 'sleep :message])))
+    (is (= (msg :security/predictable-temp-file)
+           (get-in cfg [:linters :discouraged-java-method 'java.io.File 'createTempFile :message])))
+    (testing "and clj-kondo raises them"
+      (let [f (doto (java.io.File/createTempFile "sift-static" ".clj") .deleteOnExit)
+            _ (spit f "(defn f [] (Thread/sleep 1) (java.io.File/createTempFile \"a\" \"b\"))")
+            {:keys [findings]} (kondo/run! {:lint [(str f)] :cache false :config-dir export
+                                            :config {:output {:format :edn}}})]
+        (is (= 2 (count (filter #(= :discouraged-java-method (:type %)) findings))))))))

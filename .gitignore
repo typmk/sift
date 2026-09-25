@@ -3,3 +3,4 @@ target/
 .cljs_node_repl/
 .clj-kondo/
 .lsp/
+resources/clj-kondo.exports/**/.cache/

@@ -85,6 +85,22 @@ ReDoS, CSRF, cookie flags, secrets in logs, and inter-procedural taint
 `require` outside the `ns` form, `clojure.lang.RT` calls, nested reference
 types. Tests without assertions. Tenancy rules, off by default.
 
+## clj-kondo
+
+Rules whose logic needs only the form and its position also ship as a
+clj-kondo export, `clj-kondo.exports/net.typemark/sift`: cognitive
+complexity and `cond-as-case` so far, from the same code sift runs. A
+project that depends on sift picks them up with
+
+    clj-kondo --lint "$(clojure -Spath)" --copy-configs --skip-lint
+
+and clojure-lsp then shows them in the editor. Complexity is scored per
+defining form; a project's own `def…` macros need a hook line of their own
+(`{:hooks {:analyze-call {my.ns/deftool net.typemark.sift.kondo/cognitive-complexity}}}`)
+or their bodies are scored as an anonymous `fn`. The suite fails if the
+exported code drifts from `src`, or if the hooks and sift disagree on the
+test corpus.
+
 ## Evidence
 
 Each rule declares the strongest check it has passed: `compiler` (agrees

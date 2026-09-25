@@ -9,12 +9,6 @@ and yields identical findings on the JVM, babashka and ClojureScript (node).
 
 **Status: alpha.** sift is a library, consumed by a code-graph tool and a
 SonarQube plugin. The API, rule identifiers and finding schema are unstable.
-`bin/sift` exists for testing and is not supported:
-
-    bin/sift lint src                  # babashka
-    clojure -M:sift lint src           # JVM
-    bbin install io.github.typmk/sift  # then: sift lint src
-
 `sift rules` lists the rules; `sift lint` without arguments prints the
 options.
 
@@ -35,7 +29,7 @@ or from a clone:
 
 This prints the `{:git/tag … :git/sha …}` pair for each release. Put it in `deps.edn`:
 
-    {:deps {io.github.typmk/sift {:git/tag "v0.1.0" :git/sha "…"}}}
+    {:deps {io.github.typmk/sift {:git/tag "v0.2.0" :git/sha "…"}}}
 
 For ClojureScript, put `src/` on the build's source paths.
 
@@ -78,7 +72,8 @@ exports docstrings and comments at their source lines for Vale;
 `sift vale-sarif` converts Vale's output to SARIF.
 
 **Other rules.** Reflection and boxed arithmetic predicted from source,
-scored against the compiler by `bin/validate` (requires `--oracle`).
+scored against the compiler by `bb validate`. `sift lint` needs
+`--oracle DIR`, the directory `sift oracle` writes, to report them.
 Security sinks at host APIs: XXE, JNDI, deserialisation, trust-all TLS,
 ReDoS, CSRF, cookie flags, secrets in logs, and inter-procedural taint
 (requires clj-kondo). Blocking operations inside `go`, `:else` in `case`,

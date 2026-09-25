@@ -87,19 +87,28 @@ types. Tests without assertions. Tenancy rules, off by default.
 
 ## clj-kondo
 
-Rules whose logic needs only the form and its position also ship as a
-clj-kondo export, `clj-kondo.exports/net.typemark/sift`: cognitive
-complexity and `cond-as-case` so far, from the same code sift runs. A
-project that depends on sift picks them up with
+Rules whose logic needs only a form and its position also ship as a
+clj-kondo export, `clj-kondo.exports/net.typemark/sift`, from the same
+code sift runs: cognitive complexity, the docstring rules (restates-name,
+hedge, params-unnamed, placeholder, narrates-body), cond-as-case,
+cond-as-build-up, let-as-thread, loop-as-map, loop-as-reduce,
+catch-all-swallow, and Thread/sleep and File/createTempFile as
+`:discouraged-java-method` config. A project that depends on sift picks
+them up with
 
     clj-kondo --lint "$(clojure -Spath)" --copy-configs --skip-lint
 
-and clojure-lsp then shows them in the editor. Complexity is scored per
+and clojure-lsp shows them in the editor. Complexity is scored per
 defining form; a project's own `def…` macros need a hook line of their own
-(`{:hooks {:analyze-call {my.ns/deftool net.typemark.sift.kondo/cognitive-complexity}}}`)
-or their bodies are scored as an anonymous `fn`. The suite fails if the
-exported code drifts from `src`, or if the hooks and sift disagree on the
-test corpus.
+(`{:hooks {:analyze-call {my.ns/deftool net.typemark.sift.kondo/definition}}}`)
+or their bodies are scored as an anonymous `fn`.
+
+What stays in sift: rules that need more than one form (place-as-fold,
+the taint rule), the reader forms and patterns the hook API does not
+carry (mutable-escape, the pattern rules with `:inside` or a type guard),
+typeflow and its oracle, comments, and the evidence behind every rule.
+The suite fails if an exported copy drifts from `src`, or if the hooks and
+sift disagree on the test corpus.
 
 ## Evidence
 

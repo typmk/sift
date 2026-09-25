@@ -24,6 +24,7 @@
                                         :cache false
                                         :config {:output {:format :edn}}})]
     (into #{} (for [f findings :when (#{:sift/cond-as-case :sift/cognitive-complexity :sift/restates-name :sift/hedge
+                                        :sift/loop-as-map :sift/loop-as-reduce :sift/cond-as-build-up :sift/let-as-thread
                                         :sift/params-unnamed :sift/placeholder :sift/narrates-body} (:type f))]
                 [(str (:filename f)) (keyword "sift" (name (:type f))) (:row f)]))))
 
@@ -33,7 +34,9 @@
                                                                              :complexity/cognitive-complexity :warning
                                                                              :doc/restates-name :warning :doc/hedge :warning
                                                                              :doc/params-unnamed :warning :doc/placeholder :warning
-                                                                             :doc/narrates-body :info}})
+                                                                             :doc/narrates-body :info
+                                                                             :complexity/loop-as-map :warning :complexity/loop-as-reduce :warning
+                                                                             :style/cond-as-build-up :warning :style/let-as-thread :warning}})
                                       (for [f files] {:path (str f) :text (slurp f)}))]
     (into #{} (for [f findings]
                 [(:file f) (keyword "sift" (name (:rule f))) (:line f)]))))

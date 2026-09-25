@@ -198,9 +198,7 @@
     :instruction "Do not walk a seq with loop/recur and conj onto an out vector. Use (into [] (map f) xs) or (into [] (comp (filter p) (map f)) xs). Keep the element transform; drop the out binding."}
    {:id :complexity/loop-as-reduce
     :extends :script :evidence :corpus
-    :run (fn [file _]
-           (let [z (:zloc file)]
-             (loop-fold/findings z (into #{} (map (juxt :line :column)) (map-loop/findings z)))))
+    :run (on-zloc loop-fold/findings)
     :instruction "Do not walk a seq with loop/recur to thread an accumulator. Use (reduce (fn [acc x] …) init coll). Keep the step expression; drop the seq binding and the exhaustion test."}
    {:id :complexity/first-filter-is-some
     :extends :substitution :evidence :corpus

@@ -2,7 +2,8 @@
   (:require [clj-kondo.hooks-api :as api]
             [net.typemark.sift.portable.complexity :as complexity]
             [net.typemark.sift.portable.cond-case :as cond-case]
-            [net.typemark.sift.portable.prose :as prose]))
+            [net.typemark.sift.portable.prose :as prose]
+            [net.typemark.sift.portable.shape :as shape]))
 
 (def ^:private defining '#{defn defn- fn fn* defmacro defmethod})
 
@@ -29,11 +30,34 @@
                                          (keep #(when (= :token (api/tag %)) (text %))
                                                (tree-seq :children :children n))))))})
 
+(defn- inside-defn? []
+  (some #(contains? defining (:name %)) (api/callstack)))
+
+(defn- report! [node type hit]
+  (when hit
+    (api/reg-finding! (assoc (meta node) :message (:message hit) :type type))))
+
 (defn cond-as-case
   [{:keys [node]}]
-  (when (some #(contains? defining (:name %)) (api/callstack))
-    (when-let [hit (cond-case/check (api/sexpr node))]
-      (api/reg-finding! (assoc (meta node) :message (:message hit) :type :sift/cond-as-case))))
+  (when (inside-defn?)
+    (report! node :sift/cond-as-case (cond-case/check (api/sexpr node))))
+  nil)
+
+(defn loop-form
+  [{:keys [node]}]
+  (when (inside-defn?)
+    (let [form (api/sexpr node)]
+      (report! node :sift/loop-as-map (shape/loop-as-map form))
+      (report! node :sift/loop-as-reduce (shape/loop-as-reduce form))))
+  nil)
+
+(defn let-form
+  [{:keys [node config]}]
+  (when (inside-defn?)
+    (let [form (api/sexpr node)
+          lint (:linters config)]
+      (report! node :sift/cond-as-build-up (shape/cond-as-build-up form (get-in lint [:sift/cond-as-build-up :min] 3)))
+      (report! node :sift/let-as-thread (shape/let-as-thread form (get-in lint [:sift/let-as-thread :min] 3)))))
   nil)
 
 (defn- cognitive-complexity

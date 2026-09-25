@@ -8,7 +8,7 @@
             [net.typemark.sift.json :as json]
             [net.typemark.sift.metrics :as metrics]
             [net.typemark.sift.parse :as p]
-            [net.typemark.sift.prose :as prose]
+            [net.typemark.sift.portable.prose :as prose]
             [net.typemark.sift.registry :as registry]
             [net.typemark.sift.resolve :as resolve]
             [net.typemark.sift.typeflow :as typeflow]

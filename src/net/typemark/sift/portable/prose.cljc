@@ -1,4 +1,4 @@
-(ns net.typemark.sift.prose
+(ns net.typemark.sift.portable.prose
   (:require [clojure.string :as str]))
 
 (def hedges
@@ -101,3 +101,37 @@
         :when (and (>= words min-words) (>= (/ shared words) min-overlap))]
     (finding d :doc/narrates-body
              (str shared " of " words " words in the docstring are names from the code it documents"))))
+
+(defn- symbols-in [form]
+  (filter symbol? (tree-seq coll? seq form)))
+
+(defn params-of
+  [forms]
+  (let [argvs (concat (filter vector? forms)
+                      (keep #(when (and (seq? %) (vector? (first %))) (first %)) forms))]
+    (into #{} (comp (mapcat symbols-in) (map name) (remove #{"&" "_"})) argvs)))
+
+(defn words-of
+  [forms]
+  (into #{}
+        (comp (mapcat #(tree-seq coll? seq %))
+              (keep #(cond (symbol? %) (name %) (keyword? %) (name %)))
+              (mapcat #(str/split (str/lower-case %) #"[-_/.?!*<>=+']+"))
+              (remove str/blank?))
+        forms))
+
+(defn var-record
+  [form]
+  (let [[h nm doc & more] form]
+    (when (and (seq? form) (string? doc) (symbol? nm)
+               (if (#{"def" "defonce"} (some-> h name)) (= 4 (count form)) (seq more)))
+      {:kind :var :name (name nm) :text doc :params (params-of more) :body (words-of more)})))
+
+(defn protocol-records
+  [form]
+  (when (seq? form)
+    (keep-indexed (fn [i m]
+                    (when (and (seq? m) (> (count m) 2) (symbol? (first m)) (string? (last m)))
+                      [i {:kind :var :name (name (first m)) :text (last m)
+                          :params (params-of (butlast (rest m))) :body #{}}]))
+                  form)))

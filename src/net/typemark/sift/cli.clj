@@ -6,7 +6,7 @@
             [net.typemark.sift :as sift]
             [net.typemark.sift.baseline :as baseline]
             [net.typemark.sift.json :as json]
-            [net.typemark.sift.prose :as prose]))
+            [net.typemark.sift.portable.prose :as prose]))
 
 (def ^:private usage-text
   (str/join "\n"

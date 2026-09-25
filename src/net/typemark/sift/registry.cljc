@@ -10,7 +10,7 @@
             [net.typemark.sift.let-chain :as let-chain]
             [net.typemark.sift.loop-fold :as loop-fold]
             [net.typemark.sift.map-loop :as map-loop]
-            [net.typemark.sift.prose :as prose]
+            [net.typemark.sift.portable.prose :as prose]
             [net.typemark.sift.regex :as regex]
             [net.typemark.sift.security :as security]
             [net.typemark.sift.tenancy :as tenancy]

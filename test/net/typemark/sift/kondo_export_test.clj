@@ -23,13 +23,17 @@
                                         :config-dir export
                                         :cache false
                                         :config {:output {:format :edn}}})]
-    (into #{} (for [f findings :when (#{:sift/cond-as-case :sift/cognitive-complexity} (:type f))]
+    (into #{} (for [f findings :when (#{:sift/cond-as-case :sift/cognitive-complexity :sift/restates-name :sift/hedge
+                                        :sift/params-unnamed :sift/placeholder :sift/narrates-body} (:type f))]
                 [(str (:filename f)) (keyword "sift" (name (:type f))) (:row f)]))))
 
 (defn- sift-hits [dir]
   (let [files (filter #(re-find #"\.clj[cs]?$" (str %)) (file-seq (io/file dir)))
         {:keys [findings]} (sift/lint (sift/linter {:rulesets #{} :rules {:style/cond-as-case :info
-                                                                             :complexity/cognitive-complexity :warning}})
+                                                                             :complexity/cognitive-complexity :warning
+                                                                             :doc/restates-name :warning :doc/hedge :warning
+                                                                             :doc/params-unnamed :warning :doc/placeholder :warning
+                                                                             :doc/narrates-body :info}})
                                       (for [f files] {:path (str f) :text (slurp f)}))]
     (into #{} (for [f findings]
                 [(:file f) (keyword "sift" (name (:rule f))) (:line f)]))))

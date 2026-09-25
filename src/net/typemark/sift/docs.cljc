@@ -1,5 +1,5 @@
 (ns net.typemark.sift.docs
-  (:require [clojure.string :as str]
+  (:require [net.typemark.sift.portable.prose :refer [params-of words-of]]
             [net.typemark.sift.zip :refer [children collect head-name peel sexpr token-name]]
             [rewrite-clj.zip :as z]))
 
@@ -11,24 +11,6 @@
 
 (defn- string-at? [zloc]
   (and zloc (#{:token :multi-line} (z/tag zloc)) (string? (sexpr zloc))))
-
-(defn- symbols-in [form]
-  (filter symbol? (tree-seq coll? seq form)))
-
-(defn- params-of
-  [forms]
-  (let [argvs (concat (filter vector? forms)
-                      (keep #(when (and (seq? %) (vector? (first %))) (first %)) forms))]
-    (into #{} (comp (mapcat symbols-in) (map name) (remove #{"&" "_"})) argvs)))
-
-(defn- words-of
-  [forms]
-  (into #{}
-        (comp (mapcat #(tree-seq coll? seq %))
-              (keep #(cond (symbol? %) (name %) (keyword? %) (name %)))
-              (mapcat #(str/split (str/lower-case %) #"[-_/.?!*<>=+']+"))
-              (remove str/blank?))
-        forms))
 
 (defn- var-doc
   [c]

@@ -1,40 +1,49 @@
 {:hooks {:analyze-call {clojure.core/cond net.typemark.sift.kondo/cond-as-case
                         cljs.core/cond net.typemark.sift.kondo/cond-as-case
-                        clojure.core/defn net.typemark.sift.kondo/cognitive-complexity
-                        clojure.core/defn- net.typemark.sift.kondo/cognitive-complexity
-                        clojure.core/defmacro net.typemark.sift.kondo/cognitive-complexity
-                        clojure.core/fn net.typemark.sift.kondo/cognitive-complexity
-                        clojure.core/fn* net.typemark.sift.kondo/cognitive-complexity
-                        clojure.core/defmethod net.typemark.sift.kondo/cognitive-complexity
-                        clojure.core/letfn net.typemark.sift.kondo/cognitive-complexity
-                        clojure.core/defrecord net.typemark.sift.kondo/cognitive-complexity
-                        clojure.core/deftype net.typemark.sift.kondo/cognitive-complexity
-                        clojure.core/reify net.typemark.sift.kondo/cognitive-complexity
-                        clojure.core/extend-protocol net.typemark.sift.kondo/cognitive-complexity
-                        clojure.core/extend-type net.typemark.sift.kondo/cognitive-complexity
-                        clojure.core/specify! net.typemark.sift.kondo/cognitive-complexity
-                        clojure.core/proxy net.typemark.sift.kondo/cognitive-complexity
-                        clojure.core/extend net.typemark.sift.kondo/cognitive-complexity
-                        clojure.core/def net.typemark.sift.kondo/cognitive-complexity
-                        clojure.core/defonce net.typemark.sift.kondo/cognitive-complexity
-                        cljs.core/defn net.typemark.sift.kondo/cognitive-complexity
-                        cljs.core/defn- net.typemark.sift.kondo/cognitive-complexity
-                        cljs.core/defmacro net.typemark.sift.kondo/cognitive-complexity
-                        cljs.core/fn net.typemark.sift.kondo/cognitive-complexity
-                        cljs.core/fn* net.typemark.sift.kondo/cognitive-complexity
-                        cljs.core/defmethod net.typemark.sift.kondo/cognitive-complexity
-                        cljs.core/letfn net.typemark.sift.kondo/cognitive-complexity
-                        cljs.core/defrecord net.typemark.sift.kondo/cognitive-complexity
-                        cljs.core/deftype net.typemark.sift.kondo/cognitive-complexity
-                        cljs.core/reify net.typemark.sift.kondo/cognitive-complexity
-                        cljs.core/extend-protocol net.typemark.sift.kondo/cognitive-complexity
-                        cljs.core/extend-type net.typemark.sift.kondo/cognitive-complexity
-                        cljs.core/specify! net.typemark.sift.kondo/cognitive-complexity
-                        cljs.core/proxy net.typemark.sift.kondo/cognitive-complexity
-                        cljs.core/extend net.typemark.sift.kondo/cognitive-complexity
-                        cljs.core/def net.typemark.sift.kondo/cognitive-complexity
-                        cljs.core/defonce net.typemark.sift.kondo/cognitive-complexity}}
+                        clojure.core/defn net.typemark.sift.kondo/definition
+                        clojure.core/defn- net.typemark.sift.kondo/definition
+                        clojure.core/defmacro net.typemark.sift.kondo/definition
+                        clojure.core/fn net.typemark.sift.kondo/definition
+                        clojure.core/fn* net.typemark.sift.kondo/definition
+                        clojure.core/defmethod net.typemark.sift.kondo/definition
+                        clojure.core/letfn net.typemark.sift.kondo/definition
+                        clojure.core/defrecord net.typemark.sift.kondo/definition
+                        clojure.core/deftype net.typemark.sift.kondo/definition
+                        clojure.core/reify net.typemark.sift.kondo/definition
+                        clojure.core/extend-protocol net.typemark.sift.kondo/definition
+                        clojure.core/extend-type net.typemark.sift.kondo/definition
+                        clojure.core/specify! net.typemark.sift.kondo/definition
+                        clojure.core/proxy net.typemark.sift.kondo/definition
+                        clojure.core/extend net.typemark.sift.kondo/definition
+                        clojure.core/def net.typemark.sift.kondo/definition
+                        clojure.core/defonce net.typemark.sift.kondo/definition
+                        clojure.core/defmulti net.typemark.sift.kondo/definition
+                        cljs.core/defn net.typemark.sift.kondo/definition
+                        cljs.core/defn- net.typemark.sift.kondo/definition
+                        cljs.core/defmacro net.typemark.sift.kondo/definition
+                        cljs.core/fn net.typemark.sift.kondo/definition
+                        cljs.core/fn* net.typemark.sift.kondo/definition
+                        cljs.core/defmethod net.typemark.sift.kondo/definition
+                        cljs.core/letfn net.typemark.sift.kondo/definition
+                        cljs.core/defrecord net.typemark.sift.kondo/definition
+                        cljs.core/deftype net.typemark.sift.kondo/definition
+                        cljs.core/reify net.typemark.sift.kondo/definition
+                        cljs.core/extend-protocol net.typemark.sift.kondo/definition
+                        cljs.core/extend-type net.typemark.sift.kondo/definition
+                        cljs.core/specify! net.typemark.sift.kondo/definition
+                        cljs.core/proxy net.typemark.sift.kondo/definition
+                        cljs.core/extend net.typemark.sift.kondo/definition
+                        cljs.core/def net.typemark.sift.kondo/definition
+                        cljs.core/defonce net.typemark.sift.kondo/definition
+                        cljs.core/defmulti net.typemark.sift.kondo/definition
+                        clojure.core/defprotocol net.typemark.sift.kondo/definition
+                        cljs.core/defprotocol net.typemark.sift.kondo/definition}}
  :linters {:sift/cond-as-case {:level :info}
            :sift/cognitive-complexity {:level :warning :max 15}
+           :sift/restates-name {:level :warning}
+           :sift/hedge {:level :warning}
+           :sift/params-unnamed {:level :warning}
+           :sift/placeholder {:level :warning}
+           :sift/narrates-body {:level :info :min-words 3 :min-overlap 0.75}
            :discouraged-java-method {java.lang.Thread {sleep {:message "Thread/sleep blocks a host thread"}}
                                      java.io.File {createTempFile {:message "File/createTempFile is predictable and world-readable by default"}}}}}

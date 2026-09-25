@@ -1,23 +1,20 @@
 (ns net.typemark.sift.kondo
   (:require [clj-kondo.hooks-api :as api]
             [net.typemark.sift.portable.complexity :as complexity]
-            [net.typemark.sift.portable.cond-case :as cond-case]))
+            [net.typemark.sift.portable.cond-case :as cond-case]
+            [net.typemark.sift.portable.prose :as prose]))
 
 (def ^:private defining '#{defn defn- fn fn* defmacro defmethod})
-
-(defn- inside-defn? []
-  (boolean (some #(contains? defining (:name %)) (api/callstack))))
-
-(defn cond-as-case
-  [{:keys [node]}]
-  (when (inside-defn?)
-    (when-let [hit (cond-case/check (api/sexpr node))]
-      (api/reg-finding! (assoc (meta node) :message (:message hit) :type :sift/cond-as-case))))
-  nil)
 
 (def ^:private unit-heads
   '#{defn defn- defmacro fn fn* defmethod letfn defrecord deftype reify extend-protocol
      extend-type specify! proxy extend def defonce})
+
+(def ^:private doc-heads '#{defn defn- defmacro defmulti def defonce defprotocol})
+
+(defn- head-of [node]
+  (let [h (some-> (first (:children node)) api/sexpr)]
+    (when (symbol? h) (symbol (name h)))))
 
 (defn- text [n]
   (try (pr-str (api/sexpr n)) (catch Exception _ "")))
@@ -32,19 +29,54 @@
                                          (keep #(when (= :token (api/tag %)) (text %))
                                                (tree-seq :children :children n))))))})
 
-(defn cognitive-complexity
-  [{:keys [node config cljc lang filename]}]
+(defn cond-as-case
+  [{:keys [node]}]
+  (when (some #(contains? defining (:name %)) (api/callstack))
+    (when-let [hit (cond-case/check (api/sexpr node))]
+      (api/reg-finding! (assoc (meta node) :message (:message hit) :type :sift/cond-as-case))))
+  nil)
+
+(defn- cognitive-complexity
+  [{:keys [node config filename]} stack]
+  (when (and (contains? unit-heads (head-of node))
+             (not-any? #(contains? unit-heads (:name %)) stack))
+    (let [max-score (get-in config [:linters :sift/cognitive-complexity :max] 15)
+          {:keys [ok? functions]} (complexity/report-forms ops [node] (complexity/features-for filename))]
+      (when ok?
+        (doseq [u (complexity/flatten-units functions)
+                :when (> (:cognitive u) max-score)]
+          (api/reg-finding! {:row (:line u) :col 1 :end-row (:line u) :end-col 2
+                             :type :sift/cognitive-complexity
+                             :message (str (:name u) " has cognitive " (:cognitive u) " (max " max-score
+                                           "); cyclomatic " (:cyclomatic u) ", nesting " (:max-nesting u))}))))))
+
+(defn- at [rec doc-node]
+  (let [{:keys [row col end-row end-col]} (meta doc-node)]
+    (assoc rec :line row :column col :end-line end-row :end-column end-col)))
+
+(defn- docstrings
+  [{:keys [node config]}]
+  (let [h (head-of node)
+        form (when (contains? doc-heads h) (api/sexpr node))
+        recs (cond
+               (= 'defprotocol h)
+               (for [[i rec] (prose/protocol-records form)]
+                 (at rec (last (:children (nth (:children node) i)))))
+               form
+               (when-let [rec (prose/var-record form)]
+                 [(at rec (nth (:children node) 2))]))
+        {:keys [min-words min-overlap] :or {min-words 3 min-overlap 0.75}}
+        (get-in config [:linters :sift/narrates-body])]
+    (doseq [h (concat (prose/findings recs) (prose/narrates-body recs min-words min-overlap))]
+      (api/reg-finding! {:row (:line h) :col (:column h) :end-row (:end-line h) :end-col (:end-column h)
+                         :type (keyword "sift" (name (:rule h)))
+                         :message (:message h)}))))
+
+(defn definition
+  [{:keys [cljc lang] :as ctx}]
   (let [stack (api/callstack)]
     (when (and (not (and cljc (= :cljs lang)))
-               (not-any? #(contains? unit-heads (:name %)) stack)
                (not-any? #(= 'comment (:name %)) stack))
-      (let [max-score (get-in config [:linters :sift/cognitive-complexity :max] 15)
-            {:keys [ok? functions]} (complexity/report-forms ops [node] (complexity/features-for filename))]
-        (when ok?
-          (doseq [u (complexity/flatten-units functions)
-                  :when (> (:cognitive u) max-score)]
-            (api/reg-finding! {:row (:line u) :col 1 :end-row (:line u) :end-col 2
-                               :type :sift/cognitive-complexity
-                               :message (str (:name u) " has cognitive " (:cognitive u) " (max " max-score
-                                             "); cyclomatic " (:cyclomatic u) ", nesting " (:max-nesting u))}))))))
+      (cognitive-complexity ctx stack)
+      (docstrings ctx)))
   nil)
